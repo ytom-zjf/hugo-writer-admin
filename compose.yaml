@@ -1,0 +1,12 @@
+services:
+  writer-admin:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - writer-admin-data:/app/data
+
+volumes:
+  writer-admin-data:
