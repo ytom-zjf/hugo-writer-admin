@@ -231,16 +231,13 @@ curl -b cookie.txt http://localhost:3000/api/posts
 {
   "config": {
     "dataDir": "/app/data",
-    "dbPath": "/app/data/writer-admin.sqlite",
-    "repoDir": "/app/data/repo",
     "repoUrl": "https://github.com/example/blog.git",
     "repoBranch": "main",
     "gitAuthorName": "Writer Admin",
     "gitAuthorEmail": "writer@example.com",
-    "sessionCookieName": "writer_admin_session",
+    "socksProxy": "socks5://127.0.0.1:1080",
     "sessionTtlHours": 168,
     "siteTimezoneOffset": "+08:00",
-    "configPath": "/app/config.yaml",
     "hasAdminPassword": true,
     "hasGithubToken": true
   }
@@ -262,6 +259,7 @@ curl -b cookie.txt http://localhost:3000/api/posts
   "gitAuthorName": "Writer Admin",
   "gitAuthorEmail": "writer@example.com",
   "githubToken": "",
+  "socksProxy": "socks5://127.0.0.1:1080",
   "sessionTtlHours": 168,
   "siteTimezoneOffset": "+08:00"
 }

@@ -7,6 +7,8 @@ repository:
   url: https://github.com/owner/blog.git
   branch: main
   githubToken: ghp_xxx
+network:
+  socksProxy: ""
 git:
   authorName: Writer Admin
   authorEmail: you@example.com

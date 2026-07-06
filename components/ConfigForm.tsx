@@ -23,6 +23,7 @@ export function ConfigForm({ initialConfig }: ConfigFormProps) {
   const [gitAuthorName, setGitAuthorName] = useState(initialConfig.gitAuthorName);
   const [gitAuthorEmail, setGitAuthorEmail] = useState(initialConfig.gitAuthorEmail);
   const [githubToken, setGithubToken] = useState("");
+  const [socksProxy, setSocksProxy] = useState(initialConfig.socksProxy);
   const [sessionTtlHours, setSessionTtlHours] = useState(String(initialConfig.sessionTtlHours));
   const [siteTimezoneOffset, setSiteTimezoneOffset] = useState(initialConfig.siteTimezoneOffset);
   const [statusMessage, setStatusMessage] = useState("");
@@ -49,6 +50,7 @@ export function ConfigForm({ initialConfig }: ConfigFormProps) {
             gitAuthorName,
             gitAuthorEmail,
             githubToken,
+            socksProxy,
             sessionTtlHours: Number.parseInt(sessionTtlHours, 10),
             siteTimezoneOffset,
           }),
@@ -68,6 +70,7 @@ export function ConfigForm({ initialConfig }: ConfigFormProps) {
         setRepoBranch(payload.config.repoBranch);
         setGitAuthorName(payload.config.gitAuthorName);
         setGitAuthorEmail(payload.config.gitAuthorEmail);
+        setSocksProxy(payload.config.socksProxy);
         setSessionTtlHours(String(payload.config.sessionTtlHours));
         setSiteTimezoneOffset(payload.config.siteTimezoneOffset);
         setStatusMessage("配置已保存");
@@ -79,153 +82,128 @@ export function ConfigForm({ initialConfig }: ConfigFormProps) {
   }
 
   return (
-    <div className="layout-grid config-layout">
-      <section className="editor-column">
-        <form className="editor-panel" onSubmit={handleSubmit}>
-          <div className="action-row">
-            <button className="primary-button" disabled={isPending} type="submit">
-              {isPending ? "保存中..." : "保存配置"}
-            </button>
+    <div className="config-layout">
+      <form className="editor-panel" onSubmit={handleSubmit}>
+        <div className="action-row">
+          <button className="primary-button" disabled={isPending} type="submit">
+            {isPending ? "保存中..." : "保存配置"}
+          </button>
+        </div>
+
+        <div className="meta-grid spacer-top">
+          <div className="field">
+            <label htmlFor="adminPassword">管理员密码</label>
+            <input
+              autoComplete="new-password"
+              id="adminPassword"
+              onChange={(event) => setAdminPassword(event.target.value)}
+              placeholder={config.hasAdminPassword ? "留空则不修改" : "设置 adminPassword"}
+              type="password"
+              value={adminPassword}
+            />
           </div>
 
-          <div className="meta-grid spacer-top">
-            <div className="field">
-              <label htmlFor="adminPassword">管理员密码</label>
-              <input
-                autoComplete="new-password"
-                id="adminPassword"
-                onChange={(event) => setAdminPassword(event.target.value)}
-                placeholder={config.hasAdminPassword ? "留空则不修改" : "设置 adminPassword"}
-                type="password"
-                value={adminPassword}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="githubToken">GitHub Token</label>
-              <input
-                autoComplete="off"
-                id="githubToken"
-                onChange={(event) => setGithubToken(event.target.value)}
-                placeholder={config.hasGithubToken ? "留空则不修改" : "设置 githubToken"}
-                type="password"
-                value={githubToken}
-              />
-            </div>
-
-            <div className="field config-field-wide">
-              <label htmlFor="dataDir">数据目录</label>
-              <input
-                className="mono"
-                id="dataDir"
-                onChange={(event) => setDataDir(event.target.value)}
-                placeholder="./data"
-                value={dataDir}
-              />
-            </div>
-
-            <div className="field config-field-wide">
-              <label htmlFor="repoUrl">仓库地址</label>
-              <input
-                className="mono"
-                id="repoUrl"
-                onChange={(event) => setRepoUrl(event.target.value)}
-                placeholder="https://github.com/owner/repo.git"
-                value={repoUrl}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="repoBranch">仓库分支</label>
-              <input
-                className="mono"
-                id="repoBranch"
-                onChange={(event) => setRepoBranch(event.target.value)}
-                value={repoBranch}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="siteTimezoneOffset">站点时区偏移</label>
-              <input
-                className="mono"
-                id="siteTimezoneOffset"
-                onChange={(event) => setSiteTimezoneOffset(event.target.value)}
-                placeholder="+08:00"
-                value={siteTimezoneOffset}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="gitAuthorName">Git 提交用户名</label>
-              <input
-                id="gitAuthorName"
-                onChange={(event) => setGitAuthorName(event.target.value)}
-                value={gitAuthorName}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="gitAuthorEmail">Git 提交邮箱</label>
-              <input
-                className="mono"
-                id="gitAuthorEmail"
-                onChange={(event) => setGitAuthorEmail(event.target.value)}
-                type="email"
-                value={gitAuthorEmail}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="sessionTtlHours">登录有效期（小时）</label>
-              <input
-                id="sessionTtlHours"
-                max={8760}
-                min={1}
-                onChange={(event) => setSessionTtlHours(event.target.value)}
-                type="number"
-                value={sessionTtlHours}
-              />
-            </div>
+          <div className="field">
+            <label htmlFor="githubToken">GitHub Token</label>
+            <input
+              autoComplete="off"
+              id="githubToken"
+              onChange={(event) => setGithubToken(event.target.value)}
+              placeholder={config.hasGithubToken ? "留空则不修改" : "设置 githubToken"}
+              type="password"
+              value={githubToken}
+            />
           </div>
 
-          <div className="spacer-top">
-            {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
-            {errorMessage ? <p className="status-text error-text">{errorMessage}</p> : null}
-            <p className="helper-text">
-              保存后会立即影响新的仓库操作和后续登录；当前已登录 session 不会被主动踢出。
-            </p>
+          <div className="field config-field-wide">
+            <label htmlFor="dataDir">数据目录</label>
+            <input
+              className="mono"
+              id="dataDir"
+              onChange={(event) => setDataDir(event.target.value)}
+              placeholder="./data"
+              value={dataDir}
+            />
           </div>
-        </form>
-      </section>
 
-      <aside className="side-column">
-        <section className="asset-panel">
-          <h2>运行时路径</h2>
-          <dl className="config-details">
-            <div>
-              <dt>配置文件</dt>
-              <dd className="mono">{config.configPath}</dd>
-            </div>
-            <div>
-              <dt>数据目录</dt>
-              <dd className="mono">{config.dataDir}</dd>
-            </div>
-            <div>
-              <dt>仓库工作副本</dt>
-              <dd className="mono">{config.repoDir}</dd>
-            </div>
-            <div>
-              <dt>SQLite</dt>
-              <dd className="mono">{config.dbPath}</dd>
-            </div>
-            <div>
-              <dt>Session Cookie</dt>
-              <dd className="mono">{config.sessionCookieName}</dd>
-            </div>
-          </dl>
-        </section>
-      </aside>
+          <div className="field config-field-wide">
+            <label htmlFor="repoUrl">仓库地址</label>
+            <input
+              className="mono"
+              id="repoUrl"
+              onChange={(event) => setRepoUrl(event.target.value)}
+              placeholder="https://github.com/owner/repo.git"
+              value={repoUrl}
+            />
+          </div>
+
+          <div className="field config-field-wide">
+            <label htmlFor="socksProxy">SOCKS5 代理</label>
+            <input
+              className="mono"
+              id="socksProxy"
+              onChange={(event) => setSocksProxy(event.target.value)}
+              placeholder="socks5://127.0.0.1:1080"
+              value={socksProxy}
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="repoBranch">仓库分支</label>
+            <input
+              className="mono"
+              id="repoBranch"
+              onChange={(event) => setRepoBranch(event.target.value)}
+              value={repoBranch}
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="siteTimezoneOffset">站点时区偏移</label>
+            <input
+              className="mono"
+              id="siteTimezoneOffset"
+              onChange={(event) => setSiteTimezoneOffset(event.target.value)}
+              placeholder="+08:00"
+              value={siteTimezoneOffset}
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="gitAuthorName">Git 提交用户名</label>
+            <input id="gitAuthorName" onChange={(event) => setGitAuthorName(event.target.value)} value={gitAuthorName} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="gitAuthorEmail">Git 提交邮箱</label>
+            <input
+              className="mono"
+              id="gitAuthorEmail"
+              onChange={(event) => setGitAuthorEmail(event.target.value)}
+              type="email"
+              value={gitAuthorEmail}
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="sessionTtlHours">登录有效期（小时）</label>
+            <input
+              id="sessionTtlHours"
+              max={8760}
+              min={1}
+              onChange={(event) => setSessionTtlHours(event.target.value)}
+              type="number"
+              value={sessionTtlHours}
+            />
+          </div>
+        </div>
+
+        <div className="spacer-top">
+          {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
+          {errorMessage ? <p className="status-text error-text">{errorMessage}</p> : null}
+          <p className="helper-text">保存后会立即影响新的仓库操作和后续登录；当前已登录 session 不会被主动踢出。</p>
+        </div>
+      </form>
     </div>
   );
 }

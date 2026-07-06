@@ -50,6 +50,8 @@ repository:
   url: https://github.com/ytom-zjf/my-hugo.git
   branch: main
   githubToken: ghp_xxx
+network:
+  socksProxy: ""
 git:
   authorName: YTOM Writer Admin
   authorEmail: you@example.com
@@ -62,6 +64,7 @@ site:
 - `auth.adminPassword` 用于登录后台
 - `repository.url` 指向你的博客 Git 仓库
 - `repository.githubToken` 需要有该仓库的读写权限
+- `network.socksProxy` 可选，用于 GitHub 访问加速，例如 `socks5://127.0.0.1:1080`
 - `storage.dataDir` 会保存 SQLite、session 和博客仓库工作副本
 - 博客仓库会被 clone 到 `storage.dataDir/repo`
 - 默认示例使用 `storage.dataDir: ./data`，所以本地默认仓库路径是 `writer-admin/data/repo`

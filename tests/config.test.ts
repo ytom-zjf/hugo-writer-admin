@@ -16,6 +16,7 @@ test("normalizeEditableConfigInput validates config and treats empty secrets as 
     gitAuthorName: " Writer Admin ",
     gitAuthorEmail: "writer@example.com",
     githubToken: "",
+    socksProxy: " socks5://127.0.0.1:1080 ",
     sessionTtlHours: "168",
     siteTimezoneOffset: "+08:00",
   });
@@ -25,6 +26,7 @@ test("normalizeEditableConfigInput validates config and treats empty secrets as 
   assert.equal(normalized.repoUrl, "https://github.com/example/blog.git");
   assert.equal(normalized.gitAuthorName, "Writer Admin");
   assert.equal(normalized.githubToken, undefined);
+  assert.equal(normalized.socksProxy, "socks5://127.0.0.1:1080");
   assert.equal(normalized.sessionTtlHours, 168);
 });
 
@@ -65,6 +67,21 @@ test("normalizeEditableConfigInput rejects invalid values", () => {
         repoBranch: "main",
         gitAuthorName: "Writer Admin",
         gitAuthorEmail: "writer@example.com",
+        socksProxy: "socks5h://127.0.0.1:7890",
+        sessionTtlHours: 168,
+        siteTimezoneOffset: "+08:00",
+      }),
+    ValidationError,
+  );
+
+  assert.throws(
+    () =>
+      normalizeEditableConfigInput({
+        repoUrl: "https://github.com/example/blog.git",
+        dataDir: "./data",
+        repoBranch: "main",
+        gitAuthorName: "Writer Admin",
+        gitAuthorEmail: "writer@example.com",
         sessionTtlHours: 0,
         siteTimezoneOffset: "+08:00",
       }),
@@ -84,10 +101,14 @@ test("normalizeConfigFile accepts partial YAML config and fills defaults later",
       url: "https://github.com/example/blog.git",
       githubToken: "ghp_secret",
     },
+    network: {
+      socksProxy: "socks5://127.0.0.1:1080",
+    },
   });
 
   assert.equal(normalized.adminPassword, "secret-password");
   assert.match(normalized.dataDir!, /data$/);
+  assert.equal(normalized.socksProxy, "socks5://127.0.0.1:1080");
   assert.equal(normalized.repoBranch, undefined);
 });
 
@@ -109,6 +130,8 @@ test("getPublicConfig reads config.yaml without exposing secrets", async () => {
         "  url: https://github.com/example/blog.git",
         "  branch: main",
         "  githubToken: ghp_secret",
+        "network:",
+        "  socksProxy: socks5://127.0.0.1:1080",
         "git:",
         "  authorName: Writer Admin",
         "  authorEmail: writer@example.com",
@@ -122,6 +145,7 @@ test("getPublicConfig reads config.yaml without exposing secrets", async () => {
     const publicConfig = getPublicConfig();
 
     assert.equal(publicConfig.repoUrl, "https://github.com/example/blog.git");
+    assert.equal(publicConfig.socksProxy, "socks5://127.0.0.1:1080");
     assert.equal(publicConfig.hasAdminPassword, true);
     assert.equal(publicConfig.hasGithubToken, true);
     assert.equal("adminPassword" in publicConfig, false);
@@ -147,6 +171,7 @@ test("saveEditableConfig writes grouped YAML config", async () => {
       gitAuthorName: "Writer Admin",
       gitAuthorEmail: "writer@example.com",
       githubToken: "ghp_secret",
+      socksProxy: "socks5://127.0.0.1:1080",
       sessionTtlHours: 24,
       siteTimezoneOffset: "+08:00",
     });
@@ -155,6 +180,7 @@ test("saveEditableConfig writes grouped YAML config", async () => {
 
     assert.match(source, /^auth:\n/m);
     assert.match(source, /^repository:\n/m);
+    assert.match(source, /^network:\n/m);
     assert.doesNotMatch(source, /^repoUrl:/m);
     assert.doesNotMatch(source, /^githubToken:/m);
   } finally {

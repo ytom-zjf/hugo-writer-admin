@@ -53,14 +53,31 @@ function getAuthenticatedRepoUrl() {
   return url.toString();
 }
 
+function buildGitEnv() {
+  const config = getConfig();
+  const proxyEnv = config.socksProxy
+    ? {
+        ALL_PROXY: config.socksProxy,
+        all_proxy: config.socksProxy,
+        HTTPS_PROXY: config.socksProxy,
+        https_proxy: config.socksProxy,
+        HTTP_PROXY: config.socksProxy,
+        http_proxy: config.socksProxy,
+      }
+    : {};
+
+  return {
+    ...process.env,
+    ...proxyEnv,
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
+
 async function runGit(args: string[], cwd: string) {
   try {
     const result = await execFileAsync("git", args, {
       cwd,
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: "0",
-      },
+      env: buildGitEnv(),
       maxBuffer: 1024 * 1024 * 8,
     });
 

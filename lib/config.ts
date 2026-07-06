@@ -16,6 +16,7 @@ type RuntimeConfig = {
   gitAuthorName: string;
   gitAuthorEmail: string;
   githubToken: string;
+  socksProxy: string;
   sessionCookieName: string;
   sessionTtlHours: number;
   siteTimezoneOffset: string;
@@ -30,12 +31,12 @@ type EditableRuntimeConfig = Pick<
   | "gitAuthorName"
   | "gitAuthorEmail"
   | "githubToken"
+  | "socksProxy"
   | "sessionTtlHours"
   | "siteTimezoneOffset"
 >;
 
-export type PublicRuntimeConfig = Omit<RuntimeConfig, "adminPassword" | "githubToken"> & {
-  configPath: string;
+export type PublicRuntimeConfig = Omit<EditableRuntimeConfig, "adminPassword" | "githubToken"> & {
   hasAdminPassword: boolean;
   hasGithubToken: boolean;
 };
@@ -193,6 +194,36 @@ function normalizeOptionalTimezoneOffset(value: unknown) {
   return value === undefined ? undefined : normalizeTimezoneOffset(value);
 }
 
+function normalizeOptionalSocksProxy(value: unknown) {
+  if (value === undefined) {
+    return "";
+  }
+
+  const normalized = normalizeOptionalString(value, "network.socksProxy");
+
+  if (!normalized) {
+    return "";
+  }
+
+  let parsed: URL;
+
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new ValidationError("network.socksProxy must be a valid URL");
+  }
+
+  if (parsed.protocol !== "socks5:") {
+    throw new ValidationError("network.socksProxy must use socks5://");
+  }
+
+  if (!parsed.hostname || !parsed.port) {
+    throw new ValidationError("network.socksProxy must include host and port");
+  }
+
+  return normalized;
+}
+
 export function normalizeConfigFile(input: unknown): StoredRuntimeConfig {
   if (input === null || input === undefined) {
     return {};
@@ -207,6 +238,7 @@ export function normalizeConfigFile(input: unknown): StoredRuntimeConfig {
   const repository = optionalObject(input.repository, "repository");
   const git = optionalObject(input.git, "git");
   const site = optionalObject(input.site, "site");
+  const network = optionalObject(input.network, "network");
 
   return {
     adminPassword: normalizeOptionalString(auth?.adminPassword, "auth.adminPassword"),
@@ -216,6 +248,7 @@ export function normalizeConfigFile(input: unknown): StoredRuntimeConfig {
     gitAuthorName: normalizeOptionalString(git?.authorName, "git.authorName"),
     gitAuthorEmail: normalizeOptionalGitAuthorEmail(git?.authorEmail),
     githubToken: normalizeOptionalString(repository?.githubToken, "repository.githubToken"),
+    socksProxy: normalizeOptionalSocksProxy(network?.socksProxy),
     sessionTtlHours:
       auth?.sessionTtlHours === undefined ? undefined : normalizeSessionTtlHours(auth.sessionTtlHours),
     siteTimezoneOffset: normalizeOptionalTimezoneOffset(site?.timezoneOffset),
@@ -235,6 +268,7 @@ export function normalizeEditableConfigInput(input: unknown) {
     gitAuthorName: normalizeRequiredString(input.gitAuthorName, "gitAuthorName"),
     gitAuthorEmail: normalizeGitAuthorEmail(input.gitAuthorEmail),
     githubToken: normalizeOptionalString(input.githubToken, "githubToken"),
+    socksProxy: normalizeOptionalSocksProxy(input.socksProxy),
     sessionTtlHours: normalizeSessionTtlHours(input.sessionTtlHours),
     siteTimezoneOffset: normalizeTimezoneOffset(input.siteTimezoneOffset),
   } satisfies Partial<EditableRuntimeConfig> & Omit<EditableRuntimeConfig, "adminPassword" | "githubToken">;
@@ -285,6 +319,7 @@ function resolveConfig(storedConfig: StoredRuntimeConfig): ResolvedRuntimeConfig
     gitAuthorName: storedConfig.gitAuthorName,
     gitAuthorEmail: storedConfig.gitAuthorEmail,
     githubToken: storedConfig.githubToken,
+    socksProxy: storedConfig.socksProxy ?? "",
     sessionCookieName: DEFAULT_SESSION_COOKIE_NAME,
     sessionTtlHours: storedConfig.sessionTtlHours ?? DEFAULT_SESSION_LIFETIME_HOURS,
     siteTimezoneOffset: storedConfig.siteTimezoneOffset ?? DEFAULT_TIMEZONE_OFFSET,
@@ -320,6 +355,9 @@ function toYamlConfig(config: StoredRuntimeConfig) {
       url: config.repoUrl,
       branch: config.repoBranch,
       githubToken: config.githubToken,
+    },
+    network: {
+      socksProxy: config.socksProxy,
     },
     git: {
       authorName: config.gitAuthorName,
@@ -385,16 +423,13 @@ export function getPublicConfig(): PublicRuntimeConfig {
 
   return {
     dataDir: config.dataDir,
-    dbPath: config.dbPath,
-    repoDir: config.repoDir,
     repoUrl: config.repoUrl ?? "",
     repoBranch: config.repoBranch,
     gitAuthorName: config.gitAuthorName ?? "",
     gitAuthorEmail: config.gitAuthorEmail ?? "",
-    sessionCookieName: config.sessionCookieName,
+    socksProxy: config.socksProxy,
     sessionTtlHours: config.sessionTtlHours,
     siteTimezoneOffset: config.siteTimezoneOffset,
-    configPath: getConfigFilePath(),
     hasAdminPassword: !!config.adminPassword,
     hasGithubToken: !!config.githubToken,
   };
@@ -414,6 +449,7 @@ export async function saveEditableConfig(input: unknown) {
     repoBranch: normalized.repoBranch,
     gitAuthorName: normalized.gitAuthorName,
     gitAuthorEmail: normalized.gitAuthorEmail,
+    socksProxy: normalized.socksProxy,
     sessionTtlHours: normalized.sessionTtlHours,
     siteTimezoneOffset: normalized.siteTimezoneOffset,
   };
