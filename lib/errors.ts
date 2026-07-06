@@ -36,7 +36,7 @@ export class ConfigError extends AppError {
   readonly missingKeys: string[];
 
   constructor(missingKeys: string[]) {
-    super(`Missing required environment variables: ${missingKeys.join(", ")}`, 500);
+    super(`Missing required configuration values: ${missingKeys.join(", ")}`, 500);
     this.missingKeys = missingKeys;
   }
 }

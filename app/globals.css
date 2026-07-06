@@ -106,6 +106,13 @@ button {
   flex-wrap: wrap;
 }
 
+.inline-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .primary-button,
 .secondary-button,
 .danger-button,
@@ -364,6 +371,39 @@ button {
 .two-line {
   display: grid;
   gap: 6px;
+}
+
+.config-field-wide {
+  grid-column: 1 / -1;
+}
+
+.config-details {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.config-details div {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.config-details div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.config-details dt {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.config-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .spacer-top {

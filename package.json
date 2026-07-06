@@ -20,13 +20,14 @@
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@types/mime-types": "^2.1.4",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "@types/mime-types": "^2.1.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

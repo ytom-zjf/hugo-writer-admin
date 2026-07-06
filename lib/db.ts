@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { getConfig } from "@/lib/config";
+import { getStorageConfig } from "@/lib/config";
 
 type DatabaseCache = {
   db?: DatabaseSync;
@@ -24,7 +24,7 @@ function initializeDatabase(db: DatabaseSync) {
 
 export function getDb() {
   if (!globalCache.db) {
-    const { dbPath } = getConfig();
+    const { dbPath } = getStorageConfig();
 
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 

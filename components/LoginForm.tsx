@@ -28,7 +28,8 @@ export function LoginForm() {
         return;
       }
 
-      router.replace("/posts");
+      const payload = (await response.json()) as { redirectTo?: string };
+      router.replace(payload.redirectTo || "/posts");
       router.refresh();
     });
   }
@@ -41,7 +42,7 @@ export function LoginForm() {
           autoComplete="current-password"
           id="password"
           onChange={(event) => setPassword(event.target.value)}
-          placeholder="输入 ADMIN_PASSWORD"
+          placeholder="输入 adminPassword"
           type="password"
           value={password}
         />

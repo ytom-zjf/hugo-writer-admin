@@ -4,7 +4,7 @@ import path from "node:path";
 import { getConfig } from "@/lib/config";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { type FrontmatterRecord, parsePostFile, serializePostFile } from "@/lib/frontmatter";
-import { ensureRepoReady, syncRepoIfClean } from "@/lib/repo";
+import { ensureRepoReady } from "@/lib/repo";
 import { normalizeAssetFileName, normalizePostInput, normalizeSlug, type PostInput } from "@/lib/validation";
 
 export type PostSummary = {
@@ -104,7 +104,6 @@ async function listAssetFilesInDirectory(postDir: string) {
 
 export async function listPosts() {
   await ensureRepoReady();
-  await syncRepoIfClean();
 
   const root = getPostsRoot();
   const entries = await fs.readdir(root, { withFileTypes: true });
@@ -134,7 +133,6 @@ export async function listPosts() {
 
 export async function getPost(slug: string): Promise<PostRecord> {
   await ensureRepoReady();
-  await syncRepoIfClean();
 
   const normalizedSlug = normalizeSlug(slug);
   const stored = await readStoredPost(normalizedSlug);

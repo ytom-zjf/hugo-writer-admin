@@ -1,0 +1,14 @@
+auth:
+  adminPassword: change-me
+  sessionTtlHours: 168
+storage:
+  dataDir: ./data
+repository:
+  url: https://github.com/owner/blog.git
+  branch: main
+  githubToken: ghp_xxx
+git:
+  authorName: Writer Admin
+  authorEmail: you@example.com
+site:
+  timezoneOffset: "+08:00"

@@ -1,11 +1,18 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { LogoutButton } from "@/components/LogoutButton";
+import { SyncRepoButton } from "@/components/SyncRepoButton";
 import { listPosts } from "@/lib/posts";
 import { requirePageSession } from "@/lib/auth";
+import { isOperationalConfigComplete } from "@/lib/config";
 
 export default async function PostsPage() {
   await requirePageSession();
+
+  if (!isOperationalConfigComplete()) {
+    redirect("/config");
+  }
 
   const posts = await listPosts();
 
@@ -21,6 +28,10 @@ export default async function PostsPage() {
         </div>
 
         <div className="topbar-actions">
+          <SyncRepoButton />
+          <Link className="secondary-button" href="/config">
+            配置
+          </Link>
           <Link className="primary-button" href="/posts/new">
             新建文章
           </Link>

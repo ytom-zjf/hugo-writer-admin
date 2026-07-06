@@ -3,8 +3,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { getConfig } from "@/lib/config";
-import { AuthError } from "@/lib/errors";
+import { getSessionConfig } from "@/lib/config";
+import { AuthError, ConfigError } from "@/lib/errors";
 import { createSession, deleteSession, findSession } from "@/lib/db";
 
 function safeEqual(left: string, right: string) {
@@ -19,7 +19,11 @@ function safeEqual(left: string, right: string) {
 }
 
 export async function issueSession(password: string) {
-  const config = getConfig();
+  const config = getSessionConfig();
+
+  if (!config.adminPassword) {
+    throw new ConfigError(["auth.adminPassword"]);
+  }
 
   if (!safeEqual(password, config.adminPassword)) {
     throw new AuthError("Password is incorrect");
@@ -43,7 +47,7 @@ export async function issueSession(password: string) {
 }
 
 export async function clearSession() {
-  const config = getConfig();
+  const config = getSessionConfig();
   const cookieStore = await cookies();
   const token = cookieStore.get(config.sessionCookieName)?.value;
 
@@ -55,7 +59,7 @@ export async function clearSession() {
 }
 
 export async function getSession() {
-  const config = getConfig();
+  const config = getSessionConfig();
   const cookieStore = await cookies();
   const token = cookieStore.get(config.sessionCookieName)?.value;
 

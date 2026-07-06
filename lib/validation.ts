@@ -33,7 +33,7 @@ export function formatDateWithOffset(date: Date, offset: string) {
   const match = OFFSET_PATTERN.exec(offset);
 
   if (!match) {
-    throw new ValidationError("SITE_TIMEZONE_OFFSET must look like +08:00");
+    throw new ValidationError("siteTimezoneOffset must look like +08:00");
   }
 
   const [, sign, hourText, minuteText] = match;

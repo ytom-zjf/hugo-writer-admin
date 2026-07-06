@@ -12,6 +12,13 @@ type RepoQueue = {
   chain: Promise<unknown>;
 };
 
+export type RepoSyncResult = {
+  cloned: boolean;
+  pulled: boolean;
+  skipped: boolean;
+  reason?: "localChanges";
+};
+
 const globalRepoQueue = globalThis as typeof globalThis & {
   __writerAdminRepoQueue?: RepoQueue;
 };
@@ -98,8 +105,7 @@ async function cloneRepoIfNeeded() {
   await fs.mkdir(config.dataDir, { recursive: true });
 
   if (await pathExists(gitDir)) {
-    await configureRepo();
-    return;
+    return false;
   }
 
   if (await pathExists(config.repoDir)) {
@@ -119,6 +125,7 @@ async function cloneRepoIfNeeded() {
   );
 
   await configureRepo();
+  return true;
 }
 
 async function workingTreeHasChanges() {
@@ -144,16 +151,37 @@ export async function ensureRepoReady() {
 }
 
 export async function syncRepoIfClean() {
-  await withRepoLock(async () => {
+  return withRepoLock(async (): Promise<RepoSyncResult> => {
     const config = getConfig();
 
-    await cloneRepoIfNeeded();
+    const cloned = await cloneRepoIfNeeded();
+
+    if (cloned) {
+      return {
+        cloned,
+        pulled: false,
+        skipped: false,
+      };
+    }
+
+    await configureRepo();
 
     if (await workingTreeHasChanges()) {
-      return;
+      return {
+        cloned,
+        pulled: false,
+        skipped: true,
+        reason: "localChanges",
+      };
     }
 
     await runGit(["pull", "--ff-only", "origin", config.repoBranch], config.repoDir);
+
+    return {
+      cloned,
+      pulled: true,
+      skipped: false,
+    };
   });
 }
 
@@ -161,7 +189,11 @@ export async function publishRepoChanges(commitMessage: string) {
   return withRepoLock(async () => {
     const config = getConfig();
 
-    await cloneRepoIfNeeded();
+    const cloned = await cloneRepoIfNeeded();
+
+    if (!cloned) {
+      await configureRepo();
+    }
 
     try {
       await runGit(["pull", "--rebase", "--autostash", "origin", config.repoBranch], config.repoDir);

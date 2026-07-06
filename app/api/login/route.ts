@@ -1,4 +1,5 @@
 import { issueSession } from "@/lib/auth";
+import { isOperationalConfigComplete } from "@/lib/config";
 import { handleRouteError, jsonOk } from "@/lib/http";
 
 export async function POST(request: Request) {
@@ -8,7 +9,10 @@ export async function POST(request: Request) {
 
     await issueSession(password);
 
-    return jsonOk({ ok: true });
+    return jsonOk({
+      ok: true,
+      redirectTo: isOperationalConfigComplete() ? "/posts" : "/config",
+    });
   } catch (error) {
     return handleRouteError(error);
   }

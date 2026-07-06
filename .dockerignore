@@ -1,4 +1,8 @@
-node_modules
-.next
-data
-npm-debug.log
+node_modules/
+.next/
+data/
+coverage/
+tsconfig.tsbuildinfo
+.env
+.env.*
+config.yaml

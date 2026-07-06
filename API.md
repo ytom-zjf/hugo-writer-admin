@@ -8,13 +8,15 @@ Writer Admin 的 HTTP API 主要面向本项目自己的前端页面，不是公
 - 当前 session cookie 名：`writer_admin_session`
 - 除 `POST /api/login` 外，其余接口都应视为需要先登录
 
+WEB 配置接口会把可编辑配置保存到项目根目录的 `config.yaml`。返回配置时不会包含真实 `adminPassword` 或 `githubToken`，只返回是否已设置。
+
 ## 认证与会话
 
 登录成功后，服务端会设置一个 HttpOnly cookie，浏览器后续请求会自动带上它。
 
 - Cookie 默认 `SameSite=Lax`
 - 生产环境下 cookie 会带 `Secure`
-- 会话有效期由 `SESSION_TTL_HOURS` 控制，默认 168 小时
+- 会话有效期由 `config.yaml` 中的 `auth.sessionTtlHours` 控制，默认 168 小时
 
 如果你用脚本调用 API，建议用 cookie jar 保存会话：
 
@@ -44,8 +46,8 @@ curl -b cookie.txt http://localhost:3000/api/posts
 
 ```json
 {
-  "error": "Missing required environment variables: ...",
-  "missingKeys": ["GITHUB_TOKEN", "REPO_URL"]
+  "error": "Missing required configuration values: ...",
+  "missingKeys": ["repository.githubToken", "repository.url"]
 }
 ```
 
@@ -59,7 +61,7 @@ curl -b cookie.txt http://localhost:3000/api/posts
 | `401` | 未登录或密码错误 |
 | `404` | 文章或资源不存在 |
 | `409` | 资源冲突，例如 slug 已存在 |
-| `500` | 服务端异常或环境变量缺失 |
+| `500` | 服务端异常或配置缺失 |
 
 ## 数据模型
 
@@ -119,7 +121,7 @@ curl -b cookie.txt http://localhost:3000/api/posts
 |---|---|---|
 | `title` | `string` | 必填，去掉首尾空格后不能为空 |
 | `slug` | `string` | 必填，自动转小写，只允许小写字母、数字、短横线 |
-| `date` | `string` | 可选，必须是有效 ISO-8601 时间；省略时服务端按 `SITE_TIMEZONE_OFFSET` 自动填充 |
+| `date` | `string` | 可选，必须是有效 ISO-8601 时间；省略时服务端按 `site.timezoneOffset` 自动填充 |
 | `draft` | `boolean` | 可选，默认 `true` |
 | `tags` | `string[]` | 可选，默认空数组；每项会去掉首尾空格并过滤空字符串 |
 | `categories` | `string[]` | 可选，默认空数组；规则同上 |
@@ -159,6 +161,9 @@ curl -b cookie.txt http://localhost:3000/api/posts
 |---|---|---|
 | `POST` | `/api/login` | 登录并建立 session |
 | `POST` | `/api/logout` | 退出登录并删除 session |
+| `GET` | `/api/config` | 获取脱敏后的运行时配置 |
+| `PUT` | `/api/config` | 保存 WEB 可编辑配置 |
+| `POST` | `/api/repo/sync` | 手动同步远端仓库 |
 | `GET` | `/api/posts` | 获取文章列表 |
 | `POST` | `/api/posts` | 创建新文章 |
 | `GET` | `/api/posts/:slug` | 获取单篇文章详情 |
@@ -187,9 +192,12 @@ curl -b cookie.txt http://localhost:3000/api/posts
 
 ```json
 {
-  "ok": true
+  "ok": true,
+  "redirectTo": "/posts"
 }
 ```
+
+如果仓库配置还不完整，`redirectTo` 会是 `/config`。
 
 失败示例：
 
@@ -210,6 +218,83 @@ curl -b cookie.txt http://localhost:3000/api/posts
 ```json
 {
   "ok": true
+}
+```
+
+### `GET /api/config`
+
+用途：读取脱敏后的配置。
+
+成功响应：
+
+```json
+{
+  "config": {
+    "dataDir": "/app/data",
+    "dbPath": "/app/data/writer-admin.sqlite",
+    "repoDir": "/app/data/repo",
+    "repoUrl": "https://github.com/example/blog.git",
+    "repoBranch": "main",
+    "gitAuthorName": "Writer Admin",
+    "gitAuthorEmail": "writer@example.com",
+    "sessionCookieName": "writer_admin_session",
+    "sessionTtlHours": 168,
+    "siteTimezoneOffset": "+08:00",
+    "configPath": "/app/config.yaml",
+    "hasAdminPassword": true,
+    "hasGithubToken": true
+  }
+}
+```
+
+### `PUT /api/config`
+
+用途：保存 WEB 可编辑配置。`adminPassword` 和 `githubToken` 留空表示保留当前值。
+
+请求体：
+
+```json
+{
+  "adminPassword": "",
+  "dataDir": "/app/data",
+  "repoUrl": "https://github.com/example/blog.git",
+  "repoBranch": "main",
+  "gitAuthorName": "Writer Admin",
+  "gitAuthorEmail": "writer@example.com",
+  "githubToken": "",
+  "sessionTtlHours": 168,
+  "siteTimezoneOffset": "+08:00"
+}
+```
+
+成功响应同 `GET /api/config`。
+
+### `POST /api/repo/sync`
+
+用途：手动同步远端仓库。这个接口会访问 GitHub；普通访问 `/posts` 不会自动 pull。
+
+成功响应：
+
+```json
+{
+  "result": {
+    "cloned": false,
+    "pulled": true,
+    "skipped": false
+  }
+}
+```
+
+如果本地工作副本有未发布更改，会跳过 pull：
+
+```json
+{
+  "result": {
+    "cloned": false,
+    "pulled": false,
+    "skipped": true,
+    "reason": "localChanges"
+  }
 }
 ```
 
@@ -238,8 +323,8 @@ curl -b cookie.txt http://localhost:3000/api/posts
 说明：
 
 - 本地没有工作副本时会先 clone
-- 工作副本干净时会尝试 `git pull --ff-only`
-- 如果工作副本已有未提交修改，会跳过 pull
+- 已有本地工作副本时只读取本地文件，不会自动访问 GitHub
+- 需要拉取远端更新时，调用 `POST /api/repo/sync` 或点击页面上的“同步仓库”
 
 ### `POST /api/posts`
 
