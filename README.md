@@ -8,13 +8,7 @@
 - 维护 TOML front matter
 - 上传图片到文章 bundle 目录
 - 服务内 Markdown 预览
-- 直接 commit 并 push 到 GitHub，沿用现有 Cloudflare 自动部署链路
-
-## 目录定位
-
-当前实现放在你的 Hugo 仓库子目录 `writer-admin/` 下，便于直接开发和联调。
-
-如果后续要严格符合“独立仓库”部署方式，可以把这个目录整体拆出去，不依赖 Hugo 站点内部代码。
+- 直接 commit 并 push 到 GitHub，适配GitHub pages 或 Cloudflare 自动部署链路
 
 ## API 文档
 
@@ -107,7 +101,7 @@ docker compose up --build -d
 5. 上传图片，自动插入 `./image.png` 相对路径
 6. 点击“发布到 GitHub”
 7. 服务执行 `pull --rebase --autostash`、`commit`、`push`
-8. GitHub 新提交继续触发你现有的 Cloudflare 部署
+8. GitHub 新提交继续触发你现有的 GitHub pages 或 Cloudflare 部署
 
 ## 已知边界
 
