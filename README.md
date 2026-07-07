@@ -100,8 +100,9 @@ docker compose up --build -d
 4. 新建文章并保存草稿
 5. 上传图片，自动插入 `./image.png` 相对路径
 6. 点击“发布到 GitHub”
-7. 服务执行 `pull --rebase --autostash`、`commit`、`push`
-8. GitHub 新提交继续触发你现有的 GitHub pages 或 Cloudflare 部署
+7. 服务先检查远端是否有新提交；如果远端已更新，会要求先同步仓库
+8. 远端未领先时，服务执行 `pull --rebase --autostash`、`commit`、`push`
+9. GitHub 新提交继续触发你现有的 GitHub pages 或 Cloudflare 部署
 
 ## 已知边界
 

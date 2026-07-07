@@ -163,6 +163,7 @@ curl -b cookie.txt http://localhost:3000/api/posts
 | `POST` | `/api/logout` | 退出登录并删除 session |
 | `GET` | `/api/config` | 获取脱敏后的运行时配置 |
 | `PUT` | `/api/config` | 保存 WEB 可编辑配置 |
+| `GET` | `/api/repo/status` | 检查本地工作副本与远端分支的差异 |
 | `POST` | `/api/repo/sync` | 手动同步远端仓库 |
 | `GET` | `/api/posts` | 获取文章列表 |
 | `POST` | `/api/posts` | 创建新文章 |
@@ -295,6 +296,29 @@ curl -b cookie.txt http://localhost:3000/api/posts
   }
 }
 ```
+
+### `GET /api/repo/status`
+
+用途：轻量检查本地工作副本与远端分支的差异。这个接口会执行 `git fetch`，编辑页会异步调用它；普通访问 `/posts` 不会调用。
+
+成功响应：
+
+```json
+{
+  "result": {
+    "cloned": false,
+    "ahead": 0,
+    "behind": 2,
+    "hasLocalChanges": false
+  }
+}
+```
+
+字段说明：
+
+- `ahead`：本地 `HEAD` 领先远端分支的提交数
+- `behind`：远端分支领先本地 `HEAD` 的提交数
+- `hasLocalChanges`：本地工作副本是否有未提交文件变更
 
 ### `GET /api/posts`
 
@@ -516,11 +540,14 @@ curl -b cookie.txt -X POST http://localhost:3000/api/posts/hugo-deployment-summa
 
 发布流程：
 
-1. `git pull --rebase --autostash origin <branch>`
-2. `git add --all`
-3. 若没有 staged 变更，返回 `committed: false, pushed: false`
-4. 有变更时执行 `git commit -m "post: update <slug>"`
-5. 执行 `git push origin <branch>`
+1. `git fetch origin <branch>`
+2. 检查本地 `HEAD` 是否落后远端分支
+3. 如果远端已有新提交，返回 `409`，提示先同步仓库
+4. `git pull --rebase --autostash origin <branch>`
+5. `git add --all`
+6. 若没有 staged 变更，返回 `committed: false, pushed: false`
+7. 有变更时执行 `git commit -m "post: update <slug>"`
+8. 执行 `git push origin <branch>`
 
 ### `POST /api/preview`
 

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { getConfig } from "@/lib/config";
-import { AppError } from "@/lib/errors";
+import { AppError, ConflictError } from "@/lib/errors";
 
 const execFileAsync = promisify(execFile);
 
@@ -17,6 +17,13 @@ export type RepoSyncResult = {
   pulled: boolean;
   skipped: boolean;
   reason?: "localChanges";
+};
+
+export type RepoRemoteStatus = {
+  cloned: boolean;
+  ahead: number;
+  behind: number;
+  hasLocalChanges: boolean;
 };
 
 const globalRepoQueue = globalThis as typeof globalThis & {
@@ -151,6 +158,71 @@ async function workingTreeHasChanges() {
   return result.stdout.length > 0;
 }
 
+function getRemoteBranchRef() {
+  return `refs/remotes/origin/${getConfig().repoBranch}`;
+}
+
+function getRemoteFetchRefspec() {
+  const config = getConfig();
+  return `+refs/heads/${config.repoBranch}:${getRemoteBranchRef()}`;
+}
+
+export function parseAheadBehindCount(output: string) {
+  const parts = output.trim().split(/\s+/);
+  const [aheadRaw, behindRaw] = parts;
+  const ahead = Number(aheadRaw);
+  const behind = Number(behindRaw);
+
+  if (parts.length !== 2 || !Number.isInteger(ahead) || !Number.isInteger(behind) || ahead < 0 || behind < 0) {
+    throw new AppError("Failed to read repository remote status");
+  }
+
+  return { ahead, behind };
+}
+
+async function fetchRemoteBranch() {
+  const config = getConfig();
+  await runGit(["fetch", "origin", getRemoteFetchRefspec()], config.repoDir);
+}
+
+async function readAheadBehind() {
+  const config = getConfig();
+  const result = await runGit(["rev-list", "--left-right", "--count", `HEAD...${getRemoteBranchRef()}`], config.repoDir);
+  return parseAheadBehindCount(result.stdout);
+}
+
+async function getRepoRemoteStatusUnlocked(): Promise<RepoRemoteStatus> {
+  const cloned = await cloneRepoIfNeeded();
+
+  if (!cloned) {
+    await configureRepo();
+    await fetchRemoteBranch();
+  }
+
+  const hasLocalChanges = await workingTreeHasChanges();
+  const counts = cloned ? { ahead: 0, behind: 0 } : await readAheadBehind();
+
+  return {
+    cloned,
+    ...counts,
+    hasLocalChanges,
+  };
+}
+
+async function assertRepoRemoteCurrentUnlocked() {
+  const status = await getRepoRemoteStatusUnlocked();
+
+  if (status.behind > 0) {
+    throw new ConflictError(
+      status.hasLocalChanges
+        ? "远端仓库已有更新，本地也有未发布更改；请先处理本地更改并同步后再发布"
+        : "远端仓库已有更新，请先同步仓库后再发布",
+    );
+  }
+
+  return status;
+}
+
 async function abortRebaseIfNeeded() {
   const config = getConfig();
 
@@ -165,6 +237,14 @@ export async function ensureRepoReady() {
   await withRepoLock(async () => {
     await cloneRepoIfNeeded();
   });
+}
+
+export async function getRepoRemoteStatus() {
+  return withRepoLock(getRepoRemoteStatusUnlocked);
+}
+
+export async function assertRepoRemoteCurrent() {
+  return withRepoLock(assertRepoRemoteCurrentUnlocked);
 }
 
 export async function syncRepoIfClean() {
@@ -211,6 +291,8 @@ export async function publishRepoChanges(commitMessage: string) {
     if (!cloned) {
       await configureRepo();
     }
+
+    await assertRepoRemoteCurrentUnlocked();
 
     try {
       await runGit(["pull", "--rebase", "--autostash", "origin", config.repoBranch], config.repoDir);

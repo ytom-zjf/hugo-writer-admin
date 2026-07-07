@@ -1,4 +1,4 @@
-import { publishRepoChanges } from "@/lib/repo";
+import { assertRepoRemoteCurrent, publishRepoChanges } from "@/lib/repo";
 import { requireApiSession } from "@/lib/auth";
 import { deletePost, getPost, updatePost } from "@/lib/posts";
 import { handleRouteError, jsonOk } from "@/lib/http";
@@ -39,6 +39,7 @@ export async function DELETE(_: Request, context: RouteContext) {
     const { slug } = await context.params;
     const normalizedSlug = normalizeSlug(slug);
 
+    await assertRepoRemoteCurrent();
     await deletePost(normalizedSlug);
 
     const result = await publishRepoChanges(`post: delete ${normalizedSlug}`);

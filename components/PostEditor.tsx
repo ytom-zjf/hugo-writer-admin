@@ -14,6 +14,17 @@ type SaveResponse = {
   post: PostRecord;
 };
 
+type RemoteStatus = {
+  cloned: boolean;
+  ahead: number;
+  behind: number;
+  hasLocalChanges: boolean;
+};
+
+type RemoteStatusResponse = {
+  result: RemoteStatus;
+};
+
 function joinValues(value: string[]) {
   return value.join(", ");
 }
@@ -23,6 +34,16 @@ function splitValues(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function buildRemoteBehindMessage(status: RemoteStatus) {
+  const commitText = `${status.behind} 个新提交`;
+
+  if (status.hasLocalChanges) {
+    return `远端仓库已有 ${commitText}，本地也有未发布更改；请先处理本地更改并同步后再发布。`;
+  }
+
+  return `远端仓库已有 ${commitText}，请先返回列表同步仓库后再继续发布。`;
 }
 
 function buildPreviewDocument(html: string, slug: string) {
@@ -90,9 +111,60 @@ export function PostEditor({ mode, post }: PostEditorProps) {
   const [previewHtml, setPreviewHtml] = useState("<p>开始输入内容后会显示预览。</p>");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [remoteStatus, setRemoteStatus] = useState<RemoteStatus | null>(null);
+  const [remoteStatusError, setRemoteStatusError] = useState("");
+  const [isCheckingRemoteStatus, setIsCheckingRemoteStatus] = useState(false);
   const [assets, setAssets] = useState(post?.assets ?? []);
   const [isPending, startTransition] = useTransition();
   const deferredBody = useDeferredValue(body);
+
+  async function fetchRemoteStatus(signal?: AbortSignal) {
+    const response = await fetch("/api/repo/status", {
+      cache: "no-store",
+      method: "GET",
+      signal,
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error || "远端状态检查失败");
+    }
+
+    const payload = (await response.json()) as RemoteStatusResponse;
+    return payload.result;
+  }
+
+  async function refreshRemoteStatus(signal?: AbortSignal) {
+    setIsCheckingRemoteStatus(true);
+    setRemoteStatusError("");
+
+    try {
+      const result = await fetchRemoteStatus(signal);
+      setRemoteStatus(result);
+      return { result, error: "" };
+    } catch (error) {
+      if (signal?.aborted) {
+        return { result: null, error: "" };
+      }
+
+      const message = error instanceof Error ? error.message : "远端状态检查失败";
+      setRemoteStatusError(message);
+      return { result: null, error: message };
+    } finally {
+      if (!signal?.aborted) {
+        setIsCheckingRemoteStatus(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshRemoteStatus(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -181,6 +253,18 @@ export function PostEditor({ mode, post }: PostEditorProps) {
 
     startTransition(async () => {
       try {
+        const { result: currentRemoteStatus, error: remoteCheckError } = await refreshRemoteStatus();
+
+        if (currentRemoteStatus?.behind) {
+          setErrorMessage(buildRemoteBehindMessage(currentRemoteStatus));
+          return;
+        }
+
+        if (!currentRemoteStatus) {
+          setErrorMessage(remoteCheckError || "远端状态检查失败");
+          return;
+        }
+
         const result = await saveCurrentPost(mode);
 
         const publishResponse = await fetch(`/api/posts/${result.post.slug}/publish`, {
@@ -280,11 +364,16 @@ export function PostEditor({ mode, post }: PostEditorProps) {
   }
 
   const previewDocument = buildPreviewDocument(previewHtml, post?.slug ?? slug);
+  const remoteBehindMessage = remoteStatus?.behind ? buildRemoteBehindMessage(remoteStatus) : "";
 
   return (
     <div className="layout-grid">
       <section className="editor-column">
         <div className="editor-panel">
+          {isCheckingRemoteStatus ? <p className="status-text">正在检查远端更新...</p> : null}
+          {remoteBehindMessage ? <p className="status-text warning-text">{remoteBehindMessage}</p> : null}
+          {remoteStatusError ? <p className="status-text error-text">远端状态检查失败：{remoteStatusError}</p> : null}
+
           <div className="action-row">
             <button className="primary-button" disabled={isPending} onClick={handleSave} type="button">
               {isPending ? "处理中..." : "保存草稿"}
@@ -362,7 +451,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
           <div className="spacer-top">
             {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
             {errorMessage ? <p className="status-text error-text">{errorMessage}</p> : null}
-            <p className="helper-text">保存只写入仓库工作副本；发布会 commit 并 push 到 `main`。</p>
+            <p className="helper-text">保存只写入仓库工作副本；发布会先检查远端更新，再 commit 并 push 到配置分支。</p>
           </div>
         </div>
       </section>
