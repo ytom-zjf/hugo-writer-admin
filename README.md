@@ -8,7 +8,6 @@
 - 维护 TOML front matter
 - 上传图片到文章 bundle 目录
 - 服务内 Markdown 预览
-- 直接 commit 并 push 到 GitHub，适配GitHub pages 或 Cloudflare 自动部署链路
 
 ## API 文档
 
@@ -102,7 +101,6 @@ docker compose up --build -d
 6. 点击“发布到 GitHub”
 7. 服务先检查远端是否有新提交；如果远端已更新，会要求先同步仓库
 8. 远端未领先时，服务执行 `pull --rebase --autostash`、`commit`、`push`
-9. GitHub 新提交继续触发你现有的 GitHub pages 或 Cloudflare 部署
 
 ## 已知边界
 
