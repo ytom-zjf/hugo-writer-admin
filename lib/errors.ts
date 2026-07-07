@@ -14,6 +14,12 @@ export class AuthError extends AppError {
   }
 }
 
+export class RateLimitError extends AppError {
+  constructor(message = "Too many attempts, please try again later") {
+    super(message, 429);
+  }
+}
+
 export class ValidationError extends AppError {
   constructor(message: string) {
     super(message, 400);

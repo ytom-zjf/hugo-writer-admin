@@ -2,9 +2,10 @@ import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 
-import { parse, stringify } from "yaml";
+import { parse, parseDocument, stringify } from "yaml";
 
 import { AppError, ConfigError, ValidationError } from "@/lib/errors";
+import { hashPassword } from "@/lib/password";
 
 type RuntimeConfig = {
   adminPassword: string;
@@ -455,7 +456,7 @@ export async function saveEditableConfig(input: unknown) {
   };
 
   if (normalized.adminPassword) {
-    nextConfig.adminPassword = normalized.adminPassword;
+    nextConfig.adminPassword = await hashPassword(normalized.adminPassword);
   } else if (currentConfig.adminPassword) {
     nextConfig.adminPassword = currentConfig.adminPassword;
   }
@@ -474,4 +475,17 @@ export async function saveEditableConfig(input: unknown) {
   });
 
   return getPublicConfig();
+}
+
+export async function saveAdminPasswordHash(adminPasswordHash: string) {
+  const configFilePath = getConfigFilePath();
+  const source = fs.existsSync(configFilePath) ? fs.readFileSync(configFilePath, "utf8") : "";
+  const document = parseDocument(source || "{}");
+
+  document.setIn(["auth", "adminPassword"], adminPasswordHash);
+  await fsPromises.mkdir(path.dirname(configFilePath), { recursive: true });
+  await fsPromises.writeFile(configFilePath, document.toString({ lineWidth: 0 }), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }

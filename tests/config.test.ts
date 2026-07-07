@@ -4,8 +4,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { getPublicConfig, normalizeConfigFile, normalizeEditableConfigInput, saveEditableConfig } from "../lib/config";
+import {
+  getPublicConfig,
+  normalizeConfigFile,
+  normalizeEditableConfigInput,
+  saveAdminPasswordHash,
+  saveEditableConfig,
+} from "../lib/config";
 import { ValidationError } from "../lib/errors";
+import { isPasswordHash, verifyPassword } from "../lib/password";
 
 test("normalizeEditableConfigInput validates config and treats empty secrets as unchanged", () => {
   const normalized = normalizeEditableConfigInput({
@@ -181,8 +188,50 @@ test("saveEditableConfig writes grouped YAML config", async () => {
     assert.match(source, /^auth:\n/m);
     assert.match(source, /^repository:\n/m);
     assert.match(source, /^network:\n/m);
+    assert.doesNotMatch(source, /secret-password/);
     assert.doesNotMatch(source, /^repoUrl:/m);
     assert.doesNotMatch(source, /^githubToken:/m);
+
+    const savedConfig = normalizeConfigFile({
+      auth: {
+        adminPassword: source.match(/adminPassword: (.+)/)?.[1],
+      },
+    });
+
+    assert.ok(savedConfig.adminPassword);
+    assert.equal(isPasswordHash(savedConfig.adminPassword), true);
+    assert.equal(await verifyPassword("secret-password", savedConfig.adminPassword), true);
+  } finally {
+    process.chdir(previousCwd);
+    await fs.rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("saveAdminPasswordHash only updates password hash in YAML config", async () => {
+  const previousCwd = process.cwd();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "writer-admin-config-"));
+
+  try {
+    process.chdir(tempDir);
+    await fs.writeFile(
+      path.join(tempDir, "config.yaml"),
+      [
+        "auth:",
+        "  adminPassword: plaintext-password",
+        "  sessionTtlHours: 24",
+        "storage:",
+        "  dataDir: ./data",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await saveAdminPasswordHash("scrypt:v1:salt:hash");
+
+    const source = await fs.readFile(path.join(tempDir, "config.yaml"), "utf8");
+
+    assert.match(source, /adminPassword: scrypt:v1:salt:hash/);
+    assert.match(source, /dataDir: \.\/data/);
   } finally {
     process.chdir(previousCwd);
     await fs.rm(tempDir, { force: true, recursive: true });

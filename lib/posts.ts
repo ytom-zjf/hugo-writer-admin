@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import type { Dirent } from "node:fs";
 
 import { getConfig } from "@/lib/config";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -20,11 +22,13 @@ export type PostSummary = {
 export type PostRecord = PostSummary & {
   body: string;
   assets: string[];
+  revision: string;
 };
 
 type StoredPost = {
   frontmatter: FrontmatterRecord;
   body: string;
+  revision: string;
 };
 
 function getPostsRoot() {
@@ -60,7 +64,14 @@ async function readStoredPost(slug: string): Promise<StoredPost> {
   }
 
   const source = await fs.readFile(filePath, "utf8");
-  return parsePostFile(source);
+  return {
+    ...parsePostFile(source),
+    revision: buildPostRevision(source),
+  };
+}
+
+function buildPostRevision(source: string) {
+  return createHash("sha256").update(source).digest("hex");
 }
 
 function buildSummary(slug: string, frontmatter: FrontmatterRecord, updatedAt: Date): PostSummary {
@@ -102,33 +113,50 @@ async function listAssetFilesInDirectory(postDir: string) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function isNotFoundError(error: unknown) {
+  return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
+}
+
+async function readPostSummaryFromDirectory(entry: Dirent) {
+  if (!entry.isDirectory()) {
+    return null;
+  }
+
+  const slug = entry.name;
+  const postFilePath = getPostFilePath(slug);
+
+  try {
+    const [rawContent, stats] = await Promise.all([fs.readFile(postFilePath, "utf8"), fs.stat(postFilePath)]);
+    const parsed = parsePostFile(rawContent);
+    return buildSummary(slug, parsed.frontmatter, stats.mtime);
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 export async function listPosts() {
   await ensureRepoReady();
 
   const root = getPostsRoot();
-  const entries = await fs.readdir(root, { withFileTypes: true });
-  const posts: PostSummary[] = [];
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
+  let entries: Dirent[];
+
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return [];
     }
 
-    const slug = entry.name;
-    const postFilePath = getPostFilePath(slug);
-
-    if (!(await fileExists(postFilePath))) {
-      continue;
-    }
-
-    const rawContent = await fs.readFile(postFilePath, "utf8");
-    const parsed = parsePostFile(rawContent);
-    const stats = await fs.stat(postFilePath);
-
-    posts.push(buildSummary(slug, parsed.frontmatter, stats.mtime));
+    throw error;
   }
 
-  return posts.sort((left, right) => right.date.localeCompare(left.date));
+  const posts = await Promise.all(entries.map((entry) => readPostSummaryFromDirectory(entry)));
+  return posts.filter((post): post is PostSummary => !!post).sort((left, right) => right.date.localeCompare(left.date));
 }
 
 export async function getPost(slug: string): Promise<PostRecord> {
@@ -144,6 +172,7 @@ export async function getPost(slug: string): Promise<PostRecord> {
     ...summary,
     body: stored.body,
     assets,
+    revision: stored.revision,
   };
 }
 
@@ -171,12 +200,21 @@ export async function updatePost(slug: string, input: unknown) {
 
   const normalizedSlug = normalizeSlug(slug);
   const normalized = normalizePostInput(input, getConfig().siteTimezoneOffset);
+  const expectedRevision =
+    input && typeof input === "object" && "revision" in input && typeof input.revision === "string"
+      ? input.revision.trim()
+      : "";
 
   if (normalized.slug !== normalizedSlug) {
     throw new ValidationError("Changing an existing slug is not supported");
   }
 
   const existing = await readStoredPost(normalizedSlug);
+
+  if (expectedRevision && expectedRevision !== existing.revision) {
+    throw new ConflictError("文章已被其他操作修改，请刷新后再保存");
+  }
+
   const frontmatter = buildFrontmatter(normalized, existing.frontmatter);
   await fs.writeFile(getPostFilePath(normalizedSlug), serializePostFile(frontmatter, normalized.body), "utf8");
 

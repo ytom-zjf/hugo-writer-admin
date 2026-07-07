@@ -200,6 +200,11 @@ curl -b cookie.txt http://localhost:3000/api/posts
 
 如果仓库配置还不完整，`redirectTo` 会是 `/config`。
 
+说明：
+
+- 登录失败会按客户端地址做内存限流，连续失败过多会返回 `429`
+- 旧的明文 `auth.adminPassword` 仍可登录；登录成功后会尝试自动迁移为 scrypt 哈希
+
 失败示例：
 
 ```json
@@ -248,6 +253,8 @@ curl -b cookie.txt http://localhost:3000/api/posts
 ### `PUT /api/config`
 
 用途：保存 WEB 可编辑配置。`adminPassword` 和 `githubToken` 留空表示保留当前值。
+
+说明：新设置的 `adminPassword` 会以 scrypt 哈希写入 `config.yaml`，接口响应不会返回真实密码或 token。
 
 请求体：
 
@@ -379,7 +386,8 @@ curl -b cookie.txt http://localhost:3000/api/posts
     "categories": ["技术"],
     "updatedAt": "2026-07-03T04:12:34.567Z",
     "body": "# 正文\n",
-    "assets": []
+    "assets": [],
+    "revision": "a1b2c3d4..."
   }
 }
 ```
@@ -407,7 +415,8 @@ curl -b cookie.txt http://localhost:3000/api/posts
     "categories": ["技术"],
     "updatedAt": "2026-07-03T04:12:34.567Z",
     "body": "Markdown 正文",
-    "assets": ["cover.png"]
+    "assets": ["cover.png"],
+    "revision": "dd8c0d4b..."
   }
 }
 ```
@@ -420,6 +429,7 @@ curl -b cookie.txt http://localhost:3000/api/posts
 
 - 路径参数 `:slug` 和请求体里的 `slug` 必须一致
 - 不支持借此接口改文章 slug
+- 建议带上 `GET /api/posts/:slug` 返回的 `revision`；如果文件已被其他操作修改，会返回 `409`
 
 成功响应：
 
@@ -434,7 +444,8 @@ curl -b cookie.txt http://localhost:3000/api/posts
     "categories": ["技术"],
     "updatedAt": "2026-07-03T04:12:34.567Z",
     "body": "更新后的正文",
-    "assets": ["cover.png"]
+    "assets": ["cover.png"],
+    "revision": "f0e1d2c3..."
   }
 }
 ```
@@ -548,6 +559,8 @@ curl -b cookie.txt -X POST http://localhost:3000/api/posts/hugo-deployment-summa
 6. 若没有 staged 变更，返回 `committed: false, pushed: false`
 7. 有变更时执行 `git commit -m "post: update <slug>"`
 8. 执行 `git push origin <branch>`
+
+Git 命令有超时保护；错误响应会脱敏 GitHub token 和带认证的远端 URL。
 
 ### `POST /api/preview`
 

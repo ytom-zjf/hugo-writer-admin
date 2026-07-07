@@ -108,6 +108,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
   const [tagsInput, setTagsInput] = useState(joinValues(post?.tags ?? []));
   const [categoriesInput, setCategoriesInput] = useState(joinValues(post?.categories ?? []));
   const [body, setBody] = useState(post?.body ?? "");
+  const [revision, setRevision] = useState(post?.revision ?? "");
   const [previewHtml, setPreviewHtml] = useState("<p>开始输入内容后会显示预览。</p>");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -213,6 +214,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
         tags: splitValues(tagsInput),
         categories: splitValues(categoriesInput),
         body,
+        revision: currentMode === "edit" ? revision : undefined,
       }),
     });
 
@@ -240,6 +242,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
         }
 
         setAssets(result.post.assets);
+        setRevision(result.post.revision);
         router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "保存失败");
@@ -277,6 +280,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
         }
 
         setStatusMessage("已提交并推送到 GitHub");
+        setRevision(result.post.revision);
         router.replace(`/posts/${result.post.slug}`);
         router.refresh();
       } catch (error) {

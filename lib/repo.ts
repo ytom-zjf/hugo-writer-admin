@@ -7,6 +7,7 @@ import { getConfig } from "@/lib/config";
 import { AppError, ConflictError } from "@/lib/errors";
 
 const execFileAsync = promisify(execFile);
+const GIT_COMMAND_TIMEOUT_MS = 120 * 1000;
 
 type RepoQueue = {
   chain: Promise<unknown>;
@@ -80,12 +81,24 @@ function buildGitEnv() {
   };
 }
 
+export function redactSensitiveGitOutput(message: string, githubToken?: string) {
+  let redacted = message.replace(/https:\/\/x-access-token:[^@\s]+@/g, "https://x-access-token:[redacted]@");
+
+  if (githubToken) {
+    redacted = redacted.replaceAll(githubToken, "[redacted]");
+    redacted = redacted.replaceAll(encodeURIComponent(githubToken), "[redacted]");
+  }
+
+  return redacted;
+}
+
 async function runGit(args: string[], cwd: string) {
   try {
     const result = await execFileAsync("git", args, {
       cwd,
       env: buildGitEnv(),
       maxBuffer: 1024 * 1024 * 8,
+      timeout: GIT_COMMAND_TIMEOUT_MS,
     });
 
     return {
@@ -93,14 +106,20 @@ async function runGit(args: string[], cwd: string) {
       stderr: result.stderr.trim(),
     };
   } catch (error) {
+    const config = getConfig();
+    const timedOut =
+      error instanceof Error &&
+      (("signal" in error && error.signal === "SIGTERM") || ("killed" in error && error.killed === true));
     const message =
-      error instanceof Error && "stderr" in error && typeof error.stderr === "string"
-        ? error.stderr.trim() || error.message
-        : error instanceof Error
-          ? error.message
-          : "Git command failed";
+      timedOut
+        ? `Git command timed out after ${GIT_COMMAND_TIMEOUT_MS / 1000}s`
+        : error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+          ? error.stderr.trim() || error.message
+          : error instanceof Error
+            ? error.message
+            : "Git command failed";
 
-    throw new AppError(message);
+    throw new AppError(redactSensitiveGitOutput(message, config.githubToken));
   }
 }
 

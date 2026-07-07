@@ -54,7 +54,7 @@ site:
 
 说明：
 
-- `auth.adminPassword` 用于登录后台
+- `auth.adminPassword` 用于登录后台；通过 WEB 配置页保存后会写成 scrypt 哈希，旧的明文配置仍可兼容登录并自动迁移
 - `repository.url` 指向你的博客 Git 仓库
 - `repository.githubToken` 需要有该仓库的读写权限
 - `network.socksProxy` 可选，用于 GitHub 访问加速，例如 `socks5://127.0.0.1:1080`
@@ -100,7 +100,8 @@ docker compose up --build -d
 5. 上传图片，自动插入 `./image.png` 相对路径
 6. 点击“发布到 GitHub”
 7. 服务先检查远端是否有新提交；如果远端已更新，会要求先同步仓库
-8. 远端未领先时，服务执行 `pull --rebase --autostash`、`commit`、`push`
+8. 保存文章时会校验页面加载时的文件 revision，避免旧页面覆盖新内容
+9. 远端未领先时，服务执行 `pull --rebase --autostash`、`commit`、`push`
 
 ## 已知边界
 

@@ -1,33 +1,106 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { getSessionConfig } from "@/lib/config";
-import { AuthError, ConfigError } from "@/lib/errors";
+import { getSessionConfig, saveAdminPasswordHash } from "@/lib/config";
+import { AuthError, ConfigError, RateLimitError } from "@/lib/errors";
 import { createSession, deleteSession, findSession } from "@/lib/db";
+import { hashPassword, isPasswordHash, verifyPassword } from "@/lib/password";
 
-function safeEqual(left: string, right: string) {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
+type LoginAttempt = {
+  failures: number;
+  firstFailedAt: number;
+  lockedUntil: number;
+};
 
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
+const MAX_LOGIN_FAILURES = 5;
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+
+const globalLoginAttempts = globalThis as typeof globalThis & {
+  __writerAdminLoginAttempts?: Map<string, LoginAttempt>;
+};
+
+function getLoginAttempts() {
+  if (!globalLoginAttempts.__writerAdminLoginAttempts) {
+    globalLoginAttempts.__writerAdminLoginAttempts = new Map();
   }
 
-  return timingSafeEqual(leftBuffer, rightBuffer);
+  return globalLoginAttempts.__writerAdminLoginAttempts;
 }
 
-export async function issueSession(password: string) {
+function assertLoginAllowed(rateLimitKey: string) {
+  const attempts = getLoginAttempts();
+  const current = attempts.get(rateLimitKey);
+  const now = Date.now();
+
+  if (!current) {
+    return;
+  }
+
+  if (current.lockedUntil > now) {
+    throw new RateLimitError("登录失败次数过多，请稍后再试");
+  }
+
+  if (now - current.firstFailedAt > LOGIN_FAILURE_WINDOW_MS) {
+    attempts.delete(rateLimitKey);
+  }
+}
+
+function recordLoginFailure(rateLimitKey: string) {
+  const attempts = getLoginAttempts();
+  const now = Date.now();
+  const current = attempts.get(rateLimitKey);
+  const base =
+    current && now - current.firstFailedAt <= LOGIN_FAILURE_WINDOW_MS
+      ? current
+      : {
+          failures: 0,
+          firstFailedAt: now,
+          lockedUntil: 0,
+        };
+
+  const nextFailures = base.failures + 1;
+  attempts.set(rateLimitKey, {
+    failures: nextFailures,
+    firstFailedAt: base.firstFailedAt,
+    lockedUntil: nextFailures >= MAX_LOGIN_FAILURES ? now + LOGIN_LOCK_MS : 0,
+  });
+}
+
+function clearLoginFailures(rateLimitKey: string) {
+  getLoginAttempts().delete(rateLimitKey);
+}
+
+async function upgradeLegacyPasswordIfNeeded(password: string, storedValue: string) {
+  if (isPasswordHash(storedValue)) {
+    return;
+  }
+
+  try {
+    await saveAdminPasswordHash(await hashPassword(password));
+  } catch (error) {
+    console.warn("Failed to upgrade admin password hash", error);
+  }
+}
+
+export async function issueSession(password: string, rateLimitKey = "local") {
+  assertLoginAllowed(rateLimitKey);
+
   const config = getSessionConfig();
 
   if (!config.adminPassword) {
     throw new ConfigError(["auth.adminPassword"]);
   }
 
-  if (!safeEqual(password, config.adminPassword)) {
+  if (!(await verifyPassword(password, config.adminPassword))) {
+    recordLoginFailure(rateLimitKey);
     throw new AuthError("Password is incorrect");
   }
+
+  clearLoginFailures(rateLimitKey);
+  await upgradeLegacyPasswordIfNeeded(password, config.adminPassword);
 
   const sessionId = randomBytes(24).toString("hex");
   const expiresAt = Date.now() + config.sessionTtlHours * 60 * 60 * 1000;
