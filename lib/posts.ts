@@ -6,8 +6,19 @@ import type { Dirent } from "node:fs";
 import { getConfig } from "@/lib/config";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { type FrontmatterRecord, parsePostFile, serializePostFile } from "@/lib/frontmatter";
-import { ensureRepoReady } from "@/lib/repo";
+import { ensureRepoReady, withRepoWorkingTree } from "@/lib/repo";
 import { normalizeAssetFileName, normalizePostInput, normalizeSlug, type PostInput } from "@/lib/validation";
+
+const MAX_ASSET_BYTES = 20 * 1024 * 1024;
+const ALLOWED_ASSET_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".svg",
+]);
 
 export type PostSummary = {
   slug: string;
@@ -177,27 +188,25 @@ export async function getPost(slug: string): Promise<PostRecord> {
 }
 
 export async function createPost(input: unknown) {
-  await ensureRepoReady();
-
   const normalized = normalizePostInput(input, getConfig().siteTimezoneOffset);
   const postDir = getPostDir(normalized.slug);
   const postFilePath = getPostFilePath(normalized.slug);
 
-  if (await fileExists(postDir)) {
-    throw new ConflictError(`Post "${normalized.slug}" already exists`);
-  }
+  await withRepoWorkingTree(async () => {
+    if (await fileExists(postDir)) {
+      throw new ConflictError(`Post "${normalized.slug}" already exists`);
+    }
 
-  await fs.mkdir(postDir, { recursive: true });
+    await fs.mkdir(postDir, { recursive: true });
 
-  const frontmatter = buildFrontmatter(normalized);
-  await fs.writeFile(postFilePath, serializePostFile(frontmatter, normalized.body), "utf8");
+    const frontmatter = buildFrontmatter(normalized);
+    await fs.writeFile(postFilePath, serializePostFile(frontmatter, normalized.body), "utf8");
+  });
 
   return getPost(normalized.slug);
 }
 
 export async function updatePost(slug: string, input: unknown) {
-  await ensureRepoReady();
-
   const normalizedSlug = normalizeSlug(slug);
   const normalized = normalizePostInput(input, getConfig().siteTimezoneOffset);
   const expectedRevision =
@@ -209,61 +218,72 @@ export async function updatePost(slug: string, input: unknown) {
     throw new ValidationError("Changing an existing slug is not supported");
   }
 
-  const existing = await readStoredPost(normalizedSlug);
+  await withRepoWorkingTree(async () => {
+    const existing = await readStoredPost(normalizedSlug);
 
-  if (expectedRevision && expectedRevision !== existing.revision) {
-    throw new ConflictError("文章已被其他操作修改，请刷新后再保存");
-  }
+    if (expectedRevision && expectedRevision !== existing.revision) {
+      throw new ConflictError("文章已被其他操作修改，请刷新后再保存");
+    }
 
-  const frontmatter = buildFrontmatter(normalized, existing.frontmatter);
-  await fs.writeFile(getPostFilePath(normalizedSlug), serializePostFile(frontmatter, normalized.body), "utf8");
+    const frontmatter = buildFrontmatter(normalized, existing.frontmatter);
+    await fs.writeFile(getPostFilePath(normalizedSlug), serializePostFile(frontmatter, normalized.body), "utf8");
+  });
 
   return getPost(normalizedSlug);
 }
 
 export async function deletePost(slug: string) {
-  await ensureRepoReady();
-
   const normalizedSlug = normalizeSlug(slug);
   const postDir = getPostDir(normalizedSlug);
 
-  if (!(await fileExists(postDir))) {
-    throw new NotFoundError(`Post "${normalizedSlug}" does not exist`);
-  }
+  await withRepoWorkingTree(async () => {
+    if (!(await fileExists(postDir))) {
+      throw new NotFoundError(`Post "${normalizedSlug}" does not exist`);
+    }
 
-  await fs.rm(postDir, { recursive: true, force: true });
+    await fs.rm(postDir, { recursive: true, force: true });
+  });
 }
 
 export async function savePostAsset(slug: string, file: File) {
-  await ensureRepoReady();
-
   const normalizedSlug = normalizeSlug(slug);
   const postDir = getPostDir(normalizedSlug);
   const postFilePath = getPostFilePath(normalizedSlug);
 
-  if (!(await fileExists(postFilePath))) {
-    throw new NotFoundError(`Post "${normalizedSlug}" does not exist`);
-  }
-
   const sourceName = normalizeAssetFileName(file.name);
   const extension = path.extname(sourceName);
-  const baseName = sourceName.slice(0, sourceName.length - extension.length) || "asset";
 
-  let candidateName = sourceName;
-  let index = 1;
+  if (!ALLOWED_ASSET_EXTENSIONS.has(extension.toLowerCase())) {
+    throw new ValidationError("仅支持上传图片文件（png、jpg、gif、webp、avif、svg）");
+  }
 
-  while (await fileExists(path.join(postDir, candidateName))) {
-    candidateName = `${baseName}-${index}${extension}`;
-    index += 1;
+  if (file.size > MAX_ASSET_BYTES) {
+    throw new ValidationError(`图片大小不能超过 ${MAX_ASSET_BYTES / (1024 * 1024)}MB`);
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(path.join(postDir, candidateName), buffer);
+  const baseName = sourceName.slice(0, sourceName.length - extension.length) || "asset";
 
-  return {
-    fileName: candidateName,
-    markdownPath: `./${candidateName}`,
-  };
+  return withRepoWorkingTree(async () => {
+    if (!(await fileExists(postFilePath))) {
+      throw new NotFoundError(`Post "${normalizedSlug}" does not exist`);
+    }
+
+    let candidateName = sourceName;
+    let index = 1;
+
+    while (await fileExists(path.join(postDir, candidateName))) {
+      candidateName = `${baseName}-${index}${extension}`;
+      index += 1;
+    }
+
+    await fs.writeFile(path.join(postDir, candidateName), buffer);
+
+    return {
+      fileName: candidateName,
+      markdownPath: `./${candidateName}`,
+    };
+  });
 }
 
 export async function readPostAsset(slug: string, assetPathSegments: string[]) {

@@ -1,7 +1,7 @@
 import { assertRepoRemoteCurrent, publishRepoChanges } from "@/lib/repo";
 import { requireApiSession } from "@/lib/auth";
 import { deletePost, getPost, updatePost } from "@/lib/posts";
-import { handleRouteError, jsonOk } from "@/lib/http";
+import { handleRouteError, jsonOk, readJsonBody } from "@/lib/http";
 import { normalizeSlug } from "@/lib/validation";
 
 type RouteContext = {
@@ -25,7 +25,7 @@ export async function PUT(request: Request, context: RouteContext) {
   try {
     await requireApiSession();
     const { slug } = await context.params;
-    const payload = await request.json();
+    const payload = await readJsonBody(request);
     const post = await updatePost(slug, payload);
     return jsonOk({ post });
   } catch (error) {
@@ -42,7 +42,9 @@ export async function DELETE(_: Request, context: RouteContext) {
     await assertRepoRemoteCurrent();
     await deletePost(normalizedSlug);
 
-    const result = await publishRepoChanges(`post: delete ${normalizedSlug}`);
+    const result = await publishRepoChanges(`post: delete ${normalizedSlug}`, [
+      `content/posts/${normalizedSlug}`,
+    ]);
     return jsonOk({ ok: true, publish: result });
   } catch (error) {
     return handleRouteError(error);

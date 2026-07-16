@@ -4,8 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { ConflictError } from "../lib/errors";
-import { getPost, listPosts, updatePost } from "../lib/posts";
+import { ConflictError, NotFoundError, ValidationError } from "../lib/errors";
+import { getPost, listPosts, savePostAsset, updatePost } from "../lib/posts";
 
 async function writeTestConfig(tempDir: string) {
   await fs.writeFile(
@@ -65,6 +65,58 @@ test("listPosts reads post summaries concurrently and skips directories without 
 
     assert.equal(posts.length, 1);
     assert.equal(posts[0].slug, "first-post");
+  } finally {
+    process.chdir(previousCwd);
+    await fs.rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("savePostAsset rejects non-image extensions and writes images", async () => {
+  const previousCwd = process.cwd();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "writer-admin-posts-"));
+
+  try {
+    process.chdir(tempDir);
+    await writeTestConfig(tempDir);
+    await fs.mkdir(path.join(tempDir, "data", "repo", ".git"), { recursive: true });
+    await writePost(tempDir, "first-post", "First Post", "Body");
+
+    await assert.rejects(
+      () => savePostAsset("first-post", new File(["#!/bin/sh"], "evil.sh", { type: "text/plain" })),
+      ValidationError,
+    );
+
+    const saved = await savePostAsset(
+      "first-post",
+      new File([new Uint8Array([1, 2, 3])], "diagram.png", { type: "image/png" }),
+    );
+
+    assert.equal(saved.fileName, "diagram.png");
+    assert.equal(saved.markdownPath, "./diagram.png");
+
+    const written = await fs.readFile(
+      path.join(tempDir, "data", "repo", "content", "posts", "first-post", "diagram.png"),
+    );
+    assert.equal(written.byteLength, 3);
+  } finally {
+    process.chdir(previousCwd);
+    await fs.rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("savePostAsset rejects uploads to a missing post", async () => {
+  const previousCwd = process.cwd();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "writer-admin-posts-"));
+
+  try {
+    process.chdir(tempDir);
+    await writeTestConfig(tempDir);
+    await fs.mkdir(path.join(tempDir, "data", "repo", ".git"), { recursive: true });
+
+    await assert.rejects(
+      () => savePostAsset("missing-post", new File([new Uint8Array([1])], "pic.png", { type: "image/png" })),
+      NotFoundError,
+    );
   } finally {
     process.chdir(previousCwd);
     await fs.rm(tempDir, { force: true, recursive: true });

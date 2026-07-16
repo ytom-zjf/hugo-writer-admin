@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 
-import { AppError, ConfigError } from "@/lib/errors";
+import { AppError, ConfigError, ValidationError } from "@/lib/errors";
 
 export function jsonOk<T>(data: T, status = 200) {
   return NextResponse.json(data, { status });
+}
+
+export async function readJsonBody(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    throw new ValidationError("Request body must be valid JSON");
+  }
 }
 
 export function handleRouteError(error: unknown) {

@@ -4,74 +4,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { getSessionConfig, saveAdminPasswordHash } from "@/lib/config";
-import { AuthError, ConfigError, RateLimitError } from "@/lib/errors";
+import { AuthError, ConfigError } from "@/lib/errors";
 import { createSession, deleteSession, findSession } from "@/lib/db";
+import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from "@/lib/login-rate-limit";
 import { hashPassword, isPasswordHash, verifyPassword } from "@/lib/password";
-
-type LoginAttempt = {
-  failures: number;
-  firstFailedAt: number;
-  lockedUntil: number;
-};
-
-const MAX_LOGIN_FAILURES = 5;
-const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_LOCK_MS = 15 * 60 * 1000;
-
-const globalLoginAttempts = globalThis as typeof globalThis & {
-  __writerAdminLoginAttempts?: Map<string, LoginAttempt>;
-};
-
-function getLoginAttempts() {
-  if (!globalLoginAttempts.__writerAdminLoginAttempts) {
-    globalLoginAttempts.__writerAdminLoginAttempts = new Map();
-  }
-
-  return globalLoginAttempts.__writerAdminLoginAttempts;
-}
-
-function assertLoginAllowed(rateLimitKey: string) {
-  const attempts = getLoginAttempts();
-  const current = attempts.get(rateLimitKey);
-  const now = Date.now();
-
-  if (!current) {
-    return;
-  }
-
-  if (current.lockedUntil > now) {
-    throw new RateLimitError("登录失败次数过多，请稍后再试");
-  }
-
-  if (now - current.firstFailedAt > LOGIN_FAILURE_WINDOW_MS) {
-    attempts.delete(rateLimitKey);
-  }
-}
-
-function recordLoginFailure(rateLimitKey: string) {
-  const attempts = getLoginAttempts();
-  const now = Date.now();
-  const current = attempts.get(rateLimitKey);
-  const base =
-    current && now - current.firstFailedAt <= LOGIN_FAILURE_WINDOW_MS
-      ? current
-      : {
-          failures: 0,
-          firstFailedAt: now,
-          lockedUntil: 0,
-        };
-
-  const nextFailures = base.failures + 1;
-  attempts.set(rateLimitKey, {
-    failures: nextFailures,
-    firstFailedAt: base.firstFailedAt,
-    lockedUntil: nextFailures >= MAX_LOGIN_FAILURES ? now + LOGIN_LOCK_MS : 0,
-  });
-}
-
-function clearLoginFailures(rateLimitKey: string) {
-  getLoginAttempts().delete(rateLimitKey);
-}
 
 async function upgradeLegacyPasswordIfNeeded(password: string, storedValue: string) {
   if (isPasswordHash(storedValue)) {
@@ -85,7 +21,11 @@ async function upgradeLegacyPasswordIfNeeded(password: string, storedValue: stri
   }
 }
 
-export async function issueSession(password: string, rateLimitKey = "local") {
+export async function issueSession(
+  password: string,
+  rateLimitKey = "local",
+  options: { secureCookie?: boolean } = {},
+) {
   assertLoginAllowed(rateLimitKey);
 
   const config = getSessionConfig();
@@ -111,7 +51,7 @@ export async function issueSession(password: string, rateLimitKey = "local") {
   cookieStore.set(config.sessionCookieName, sessionId, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: config.cookieSecure ?? options.secureCookie ?? process.env.NODE_ENV === "production",
     path: "/",
     expires: new Date(expiresAt),
   });

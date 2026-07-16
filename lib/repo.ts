@@ -210,6 +210,29 @@ async function readAheadBehind() {
   return parseAheadBehindCount(result.stdout);
 }
 
+type RemoteStatusCache = {
+  status: RepoRemoteStatus;
+  fetchedAt: number;
+};
+
+const globalRemoteStatusCache = globalThis as typeof globalThis & {
+  __writerAdminRemoteStatusCache?: RemoteStatusCache;
+};
+
+function readCachedRemoteStatus(maxAgeMs: number) {
+  const cached = globalRemoteStatusCache.__writerAdminRemoteStatusCache;
+
+  if (maxAgeMs <= 0 || !cached || Date.now() - cached.fetchedAt > maxAgeMs) {
+    return null;
+  }
+
+  return cached.status;
+}
+
+function invalidateRemoteStatusCache() {
+  globalRemoteStatusCache.__writerAdminRemoteStatusCache = undefined;
+}
+
 async function getRepoRemoteStatusUnlocked(): Promise<RepoRemoteStatus> {
   const cloned = await cloneRepoIfNeeded();
 
@@ -221,11 +244,18 @@ async function getRepoRemoteStatusUnlocked(): Promise<RepoRemoteStatus> {
   const hasLocalChanges = await workingTreeHasChanges();
   const counts = cloned ? { ahead: 0, behind: 0 } : await readAheadBehind();
 
-  return {
+  const status = {
     cloned,
     ...counts,
     hasLocalChanges,
   };
+
+  globalRemoteStatusCache.__writerAdminRemoteStatusCache = {
+    status,
+    fetchedAt: Date.now(),
+  };
+
+  return status;
 }
 
 async function assertRepoRemoteCurrentUnlocked() {
@@ -258,8 +288,39 @@ export async function ensureRepoReady() {
   });
 }
 
-export async function getRepoRemoteStatus() {
-  return withRepoLock(getRepoRemoteStatusUnlocked);
+// Runs a working-tree mutation (post write, asset write, delete) under the repo
+// lock so it cannot interleave with the fetch/commit/push inside publish.
+export async function withRepoWorkingTree<T>(work: () => Promise<T>): Promise<T> {
+  return withRepoLock(async () => {
+    await cloneRepoIfNeeded();
+
+    try {
+      return await work();
+    } finally {
+      invalidateRemoteStatusCache();
+    }
+  });
+}
+
+const REMOTE_STATUS_CACHE_TTL_MS = 30 * 1000;
+
+export async function getRepoRemoteStatus(options: { maxAgeMs?: number } = {}) {
+  const maxAgeMs = options.maxAgeMs ?? REMOTE_STATUS_CACHE_TTL_MS;
+  const cached = readCachedRemoteStatus(maxAgeMs);
+
+  if (cached) {
+    return cached;
+  }
+
+  return withRepoLock(async () => {
+    const fresh = readCachedRemoteStatus(maxAgeMs);
+
+    if (fresh) {
+      return fresh;
+    }
+
+    return getRepoRemoteStatusUnlocked();
+  });
 }
 
 export async function assertRepoRemoteCurrent() {
@@ -273,6 +334,7 @@ export async function syncRepoIfClean() {
     const cloned = await cloneRepoIfNeeded();
 
     if (cloned) {
+      invalidateRemoteStatusCache();
       return {
         cloned,
         pulled: false,
@@ -292,6 +354,7 @@ export async function syncRepoIfClean() {
     }
 
     await runGit(["pull", "--ff-only", "origin", config.repoBranch], config.repoDir);
+    invalidateRemoteStatusCache();
 
     return {
       cloned,
@@ -301,38 +364,35 @@ export async function syncRepoIfClean() {
   });
 }
 
-export async function publishRepoChanges(commitMessage: string) {
+export async function publishRepoChanges(commitMessage: string, pathspecs?: string[]) {
   return withRepoLock(async () => {
     const config = getConfig();
 
-    const cloned = await cloneRepoIfNeeded();
+    await cloneRepoIfNeeded();
 
-    if (!cloned) {
-      await configureRepo();
-    }
+    // Recover from a rebase a crashed publish may have left in progress before
+    // configureRepo tries to checkout the branch.
+    await abortRebaseIfNeeded();
 
+    // Configures and fetches the remote branch; throws when behind, so past this
+    // point HEAD already contains every remote commit and a plain commit + push
+    // fast-forwards without a separate network round-trip for rebase.
     await assertRepoRemoteCurrentUnlocked();
 
-    try {
-      await runGit(["pull", "--rebase", "--autostash", "origin", config.repoBranch], config.repoDir);
-    } catch (error) {
-      await abortRebaseIfNeeded();
-      throw error;
-    }
+    const pathspecArgs = pathspecs && pathspecs.length > 0 ? ["--", ...pathspecs] : [];
+    const pending = await runGit(["status", "--porcelain", ...pathspecArgs], config.repoDir);
 
-    await runGit(["add", "--all"], config.repoDir);
-
-    const staged = await runGit(["diff", "--cached", "--name-only"], config.repoDir);
-
-    if (!staged.stdout) {
+    if (!pending.stdout) {
       return {
         committed: false,
         pushed: false,
       };
     }
 
-    await runGit(["commit", "-m", commitMessage], config.repoDir);
+    await runGit(["add", "--all", ...pathspecArgs], config.repoDir);
+    await runGit(["commit", "-m", commitMessage, ...pathspecArgs], config.repoDir);
     await runGit(["push", "origin", config.repoBranch], config.repoDir);
+    invalidateRemoteStatusCache();
 
     return {
       committed: true,

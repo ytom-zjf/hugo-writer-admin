@@ -14,6 +14,46 @@ import {
 import { ValidationError } from "../lib/errors";
 import { isPasswordHash, verifyPassword } from "../lib/password";
 
+test("normalizeConfigFile parses auth.cookieSecure as an optional boolean", () => {
+  assert.equal(normalizeConfigFile({ auth: { cookieSecure: true } }).cookieSecure, true);
+  assert.equal(normalizeConfigFile({ auth: { cookieSecure: "false" } }).cookieSecure, false);
+  assert.equal(normalizeConfigFile({ auth: { cookieSecure: "auto" } }).cookieSecure, undefined);
+  assert.equal(normalizeConfigFile({ auth: {} }).cookieSecure, undefined);
+  assert.throws(() => normalizeConfigFile({ auth: { cookieSecure: "yes" } }), ValidationError);
+});
+
+test("saveEditableConfig preserves auth.cookieSecure not exposed in the web form", async () => {
+  const previousCwd = process.cwd();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "writer-admin-config-"));
+
+  try {
+    process.chdir(tempDir);
+    await fs.writeFile(
+      path.join(tempDir, "config.yaml"),
+      ["auth:", "  adminPassword: scrypt:v1:salt:hash", "  cookieSecure: false", ""].join("\n"),
+      "utf8",
+    );
+
+    await saveEditableConfig({
+      dataDir: "./data",
+      repoUrl: "https://github.com/example/blog.git",
+      repoBranch: "main",
+      gitAuthorName: "Writer Admin",
+      gitAuthorEmail: "writer@example.com",
+      githubToken: "ghp_secret",
+      socksProxy: "",
+      sessionTtlHours: 168,
+      siteTimezoneOffset: "+08:00",
+    });
+
+    const source = await fs.readFile(path.join(tempDir, "config.yaml"), "utf8");
+    assert.match(source, /cookieSecure: false/);
+  } finally {
+    process.chdir(previousCwd);
+    await fs.rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("normalizeEditableConfigInput validates config and treats empty secrets as unchanged", () => {
   const normalized = normalizeEditableConfigInput({
     adminPassword: " ",

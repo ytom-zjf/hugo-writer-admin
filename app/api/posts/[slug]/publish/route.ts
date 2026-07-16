@@ -14,7 +14,9 @@ export async function POST(_: Request, context: RouteContext) {
     await requireApiSession();
     const { slug } = await context.params;
     const normalizedSlug = normalizeSlug(slug);
-    const publish = await publishRepoChanges(`post: update ${normalizedSlug}`);
+    const publish = await publishRepoChanges(`post: update ${normalizedSlug}`, [
+      `content/posts/${normalizedSlug}`,
+    ]);
 
     return jsonOk({ publish });
   } catch (error) {

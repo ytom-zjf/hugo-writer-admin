@@ -1,6 +1,6 @@
 import { requireApiSession } from "@/lib/auth";
 import { getPublicConfig, saveEditableConfig } from "@/lib/config";
-import { handleRouteError, jsonOk } from "@/lib/http";
+import { handleRouteError, jsonOk, readJsonBody } from "@/lib/http";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     await requireApiSession();
-    const payload = await request.json();
+    const payload = await readJsonBody(request);
     const config = await saveEditableConfig(payload);
     return jsonOk({ config });
   } catch (error) {

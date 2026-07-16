@@ -1,6 +1,6 @@
 import { requireApiSession } from "@/lib/auth";
 import { createPost, listPosts } from "@/lib/posts";
-import { handleRouteError, jsonOk } from "@/lib/http";
+import { handleRouteError, jsonOk, readJsonBody } from "@/lib/http";
 
 export async function GET() {
   try {
@@ -15,7 +15,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     await requireApiSession();
-    const payload = await request.json();
+    const payload = await readJsonBody(request);
     const post = await createPost(payload);
     return jsonOk({ post }, 201);
   } catch (error) {

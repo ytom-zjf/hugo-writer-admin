@@ -489,7 +489,12 @@ export function PostEditor({ mode, post }: PostEditorProps) {
         <div className="preview-panel">
           <h2>预览</h2>
           <p className="muted-text">这里是服务内 Markdown 预览，样式接近最终页面，但不等同于 Hugo 主题渲染。</p>
-          <iframe className="preview-frame" srcDoc={previewDocument} title="Markdown preview" />
+          <iframe
+            className="preview-frame"
+            sandbox="allow-same-origin"
+            srcDoc={previewDocument}
+            title="Markdown preview"
+          />
         </div>
       </aside>
     </div>

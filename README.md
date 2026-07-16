@@ -55,12 +55,14 @@ site:
 说明：
 
 - `auth.adminPassword` 用于登录后台；通过 WEB 配置页保存后会写成 scrypt 哈希，旧的明文配置仍可兼容登录并自动迁移
+- `auth.cookieSecure` 可选，控制 session cookie 是否带 `Secure` 标记：`auto`（默认，生产环境按请求是否 HTTPS 判断）、`true`（强制）、`false`（关闭）。通过 HTTP 局域网 IP 访问且登录后一直跳回登录页时，设为 `false`
 - `repository.url` 指向你的博客 Git 仓库
 - `repository.githubToken` 需要有该仓库的读写权限
 - `network.socksProxy` 可选，用于 GitHub 访问加速，例如 `socks5://127.0.0.1:1080`
 - `storage.dataDir` 会保存 SQLite、session 和博客仓库工作副本
 - 博客仓库会被 clone 到 `storage.dataDir/repo`
 - 默认示例使用 `storage.dataDir: ./data`，所以本地默认仓库路径是 `writer-admin/data/repo`
+- 图片上传限制：仅支持 png / jpg / gif / webp / avif / svg，单张不超过 20MB
 - `config.yaml` 已加入 `.gitignore`，不要把真实密码和 token 提交到仓库
 
 ### 关于 Docker Compose

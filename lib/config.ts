@@ -48,11 +48,16 @@ type SessionRuntimeConfig = Pick<
   "sessionCookieName" | "sessionTtlHours"
 > & {
   adminPassword?: string;
+  cookieSecure?: boolean;
 };
 
-type StoredRuntimeConfig = Partial<EditableRuntimeConfig>;
+type StoredRuntimeConfig = Partial<EditableRuntimeConfig> & {
+  cookieSecure?: boolean;
+};
 type ResolvedRuntimeConfig = Omit<RuntimeConfig, "adminPassword" | "repoUrl" | "gitAuthorName" | "gitAuthorEmail" | "githubToken"> &
-  Partial<Pick<RuntimeConfig, "adminPassword" | "repoUrl" | "gitAuthorName" | "gitAuthorEmail" | "githubToken">>;
+  Partial<Pick<RuntimeConfig, "adminPassword" | "repoUrl" | "gitAuthorName" | "gitAuthorEmail" | "githubToken">> & {
+    cookieSecure?: boolean;
+  };
 
 const CONFIG_FILE_NAME = "config.yaml";
 const OFFSET_PATTERN = /^([+-])(?:0\d|1\d|2[0-3]):[0-5]\d$/;
@@ -195,6 +200,34 @@ function normalizeOptionalTimezoneOffset(value: unknown) {
   return value === undefined ? undefined : normalizeTimezoneOffset(value);
 }
 
+function normalizeOptionalCookieSecure(value: unknown) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    if (normalized === "" || normalized === "auto") {
+      return undefined;
+    }
+
+    if (normalized === "true") {
+      return true;
+    }
+
+    if (normalized === "false") {
+      return false;
+    }
+  }
+
+  throw new ValidationError("auth.cookieSecure must be auto, true, or false");
+}
+
 function normalizeOptionalSocksProxy(value: unknown) {
   if (value === undefined) {
     return "";
@@ -252,6 +285,7 @@ export function normalizeConfigFile(input: unknown): StoredRuntimeConfig {
     socksProxy: normalizeOptionalSocksProxy(network?.socksProxy),
     sessionTtlHours:
       auth?.sessionTtlHours === undefined ? undefined : normalizeSessionTtlHours(auth.sessionTtlHours),
+    cookieSecure: normalizeOptionalCookieSecure(auth?.cookieSecure),
     siteTimezoneOffset: normalizeOptionalTimezoneOffset(site?.timezoneOffset),
   };
 }
@@ -288,15 +322,38 @@ function parseConfigYaml(source: string) {
   }
 }
 
+type ConfigCache = {
+  key: string;
+  value: StoredRuntimeConfig;
+};
+
+const globalConfigCache = globalThis as typeof globalThis & {
+  __writerAdminConfigCache?: ConfigCache;
+};
+
 function readYamlConfig(): StoredRuntimeConfig {
   const filePath = getConfigFilePath();
 
-  if (!fs.existsSync(filePath)) {
+  let stats: fs.Stats;
+
+  try {
+    stats = fs.statSync(filePath);
+  } catch {
+    globalConfigCache.__writerAdminConfigCache = undefined;
     return {};
   }
 
+  const cacheKey = `${filePath}:${stats.mtimeMs}:${stats.size}`;
+  const cached = globalConfigCache.__writerAdminConfigCache;
+
+  if (cached && cached.key === cacheKey) {
+    return cached.value;
+  }
+
   try {
-    return parseConfigYaml(fs.readFileSync(filePath, "utf8"));
+    const value = parseConfigYaml(fs.readFileSync(filePath, "utf8"));
+    globalConfigCache.__writerAdminConfigCache = { key: cacheKey, value };
+    return value;
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
@@ -323,6 +380,7 @@ function resolveConfig(storedConfig: StoredRuntimeConfig): ResolvedRuntimeConfig
     socksProxy: storedConfig.socksProxy ?? "",
     sessionCookieName: DEFAULT_SESSION_COOKIE_NAME,
     sessionTtlHours: storedConfig.sessionTtlHours ?? DEFAULT_SESSION_LIFETIME_HOURS,
+    cookieSecure: storedConfig.cookieSecure,
     siteTimezoneOffset: storedConfig.siteTimezoneOffset ?? DEFAULT_TIMEZONE_OFFSET,
   };
 }
@@ -348,6 +406,7 @@ function toYamlConfig(config: StoredRuntimeConfig) {
     auth: {
       adminPassword: config.adminPassword,
       sessionTtlHours: config.sessionTtlHours,
+      cookieSecure: config.cookieSecure,
     },
     storage: {
       dataDir: config.dataDir,
@@ -416,6 +475,7 @@ export function getSessionConfig(): SessionRuntimeConfig {
     adminPassword: config.adminPassword,
     sessionCookieName: config.sessionCookieName,
     sessionTtlHours: config.sessionTtlHours,
+    cookieSecure: config.cookieSecure,
   };
 }
 
@@ -452,6 +512,7 @@ export async function saveEditableConfig(input: unknown) {
     gitAuthorEmail: normalized.gitAuthorEmail,
     socksProxy: normalized.socksProxy,
     sessionTtlHours: normalized.sessionTtlHours,
+    cookieSecure: currentConfig.cookieSecure,
     siteTimezoneOffset: normalized.siteTimezoneOffset,
   };
 
@@ -473,6 +534,7 @@ export async function saveEditableConfig(input: unknown) {
     encoding: "utf8",
     mode: 0o600,
   });
+  globalConfigCache.__writerAdminConfigCache = undefined;
 
   return getPublicConfig();
 }
@@ -488,4 +550,5 @@ export async function saveAdminPasswordHash(adminPasswordHash: string) {
     encoding: "utf8",
     mode: 0o600,
   });
+  globalConfigCache.__writerAdminConfigCache = undefined;
 }
