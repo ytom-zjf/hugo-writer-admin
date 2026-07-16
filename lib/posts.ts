@@ -286,6 +286,33 @@ export async function savePostAsset(slug: string, file: File) {
   });
 }
 
+export async function deletePostAsset(slug: string, fileName: string) {
+  const normalizedSlug = normalizeSlug(slug);
+  const postDir = getPostDir(normalizedSlug);
+  const sanitizedName = normalizeAssetFileName(fileName);
+
+  if (sanitizedName === "index.md") {
+    throw new ValidationError("Cannot delete the post file");
+  }
+
+  const absolutePath = path.join(postDir, sanitizedName);
+  const relative = path.relative(postDir, absolutePath);
+
+  if (relative.startsWith("..") || path.isAbsolute(relative) || relative !== sanitizedName) {
+    throw new ValidationError("Invalid asset path");
+  }
+
+  await withRepoWorkingTree(async () => {
+    if (!(await fileExists(absolutePath))) {
+      throw new NotFoundError("Asset does not exist");
+    }
+
+    await fs.rm(absolutePath);
+  });
+
+  return { fileName: sanitizedName };
+}
+
 export async function readPostAsset(slug: string, assetPathSegments: string[]) {
   await ensureRepoReady();
 

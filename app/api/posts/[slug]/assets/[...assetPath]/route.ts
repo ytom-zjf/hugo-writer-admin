@@ -1,8 +1,9 @@
 import { lookup } from "mime-types";
 
 import { requireApiSession } from "@/lib/auth";
-import { handleRouteError } from "@/lib/http";
-import { readPostAsset } from "@/lib/posts";
+import { ValidationError } from "@/lib/errors";
+import { handleRouteError, jsonOk } from "@/lib/http";
+import { deletePostAsset, readPostAsset } from "@/lib/posts";
 
 type RouteContext = {
   params: Promise<{
@@ -24,6 +25,22 @@ export async function GET(_: Request, context: RouteContext) {
         "Cache-Control": "private, max-age=60",
       },
     });
+  } catch (error) {
+    return handleRouteError(error);
+  }
+}
+
+export async function DELETE(_: Request, context: RouteContext) {
+  try {
+    await requireApiSession();
+    const { slug, assetPath } = await context.params;
+
+    if (assetPath.length !== 1) {
+      throw new ValidationError("Invalid asset path");
+    }
+
+    const result = await deletePostAsset(slug, assetPath[0]);
+    return jsonOk({ ok: true, asset: result });
   } catch (error) {
     return handleRouteError(error);
   }

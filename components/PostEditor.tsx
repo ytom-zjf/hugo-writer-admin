@@ -1,7 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChangeEvent, useDeferredValue, useEffect, useState, useTransition } from "react";
+import {
+  ChangeEvent,
+  ClipboardEvent,
+  DragEvent,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 
 import type { PostRecord } from "@/lib/posts";
 
@@ -116,8 +125,70 @@ export function PostEditor({ mode, post }: PostEditorProps) {
   const [remoteStatusError, setRemoteStatusError] = useState("");
   const [isCheckingRemoteStatus, setIsCheckingRemoteStatus] = useState(false);
   const [assets, setAssets] = useState(post?.assets ?? []);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [isPending, startTransition] = useTransition();
   const deferredBody = useDeferredValue(body);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  function buildSnapshot() {
+    return JSON.stringify([title, slug, date, draft, tagsInput, categoriesInput, body]);
+  }
+
+  const savedSnapshotRef = useRef(buildSnapshot());
+  const isDirty = savedSnapshotRef.current !== buildSnapshot();
+
+  function markSaved() {
+    savedSnapshotRef.current = buildSnapshot();
+  }
+
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (savedSnapshotRef.current !== buildSnapshot()) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  });
+
+  useEffect(() => {
+    // Client-side navigations (e.g. the back-to-list link) bypass beforeunload,
+    // so intercept anchor clicks in the capture phase while there are unsaved edits.
+    function handleClickCapture(event: MouseEvent) {
+      if (savedSnapshotRef.current === buildSnapshot()) {
+        return;
+      }
+
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+
+      if (!anchor) {
+        return;
+      }
+
+      if (!window.confirm("当前有未保存的更改，确定要离开吗？")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }
+
+    document.addEventListener("click", handleClickCapture, true);
+    return () => document.removeEventListener("click", handleClickCapture, true);
+  });
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        handleSave();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   async function fetchRemoteStatus(signal?: AbortSignal) {
     const response = await fetch("/api/repo/status", {
@@ -233,6 +304,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
     startTransition(async () => {
       try {
         const result = await saveCurrentPost(mode);
+        markSaved();
         setStatusMessage("草稿已保存");
 
         if (mode === "create") {
@@ -280,6 +352,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
         }
 
         setStatusMessage("已提交并推送到 GitHub");
+        markSaved();
         setRevision(result.post.revision);
         router.replace(`/posts/${result.post.slug}`);
         router.refresh();
@@ -322,14 +395,29 @@ export function PostEditor({ mode, post }: PostEditorProps) {
     });
   }
 
-  async function handleAssetUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
+  function insertIntoBody(snippet: string) {
+    const textarea = bodyRef.current;
 
-    if (!file) {
+    if (!textarea) {
+      setBody((current) => `${current.trimEnd()}\n\n${snippet}\n`);
       return;
     }
 
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    const needsLeadingBreak = start > 0 && textarea.value[start - 1] !== "\n";
+    const insertion = `${needsLeadingBreak ? "\n" : ""}${snippet}\n`;
+
+    setBody((current) => `${current.slice(0, start)}${insertion}${current.slice(end)}`);
+
+    requestAnimationFrame(() => {
+      const cursor = start + insertion.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  async function uploadAssetFile(file: File) {
     if (mode === "create") {
       setErrorMessage("请先保存草稿，再上传图片");
       return;
@@ -337,6 +425,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
 
     setErrorMessage("");
     setStatusMessage("");
+    setIsUploading(true);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -360,10 +449,103 @@ export function PostEditor({ mode, post }: PostEditorProps) {
       };
 
       setAssets((current) => [...current, payload.asset.fileName]);
-      setBody((current) => `${current.trimEnd()}\n\n![](${payload.asset.markdownPath})\n`);
+      insertIntoBody(`![](${payload.asset.markdownPath})`);
       setStatusMessage(`已上传 ${payload.asset.fileName}`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "上传失败");
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleAssetUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    await uploadAssetFile(file);
+  }
+
+  function pickImageFiles(fileList: FileList | undefined | null) {
+    return Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"));
+  }
+
+  function handleBodyPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const images = pickImageFiles(event.clipboardData?.files);
+
+    if (images.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    void (async () => {
+      for (const image of images) {
+        await uploadAssetFile(image);
+      }
+    })();
+  }
+
+  function handleBodyDragOver(event: DragEvent<HTMLTextAreaElement>) {
+    if (Array.from(event.dataTransfer?.items ?? []).some((item) => item.kind === "file")) {
+      event.preventDefault();
+      setIsDragging(true);
+    }
+  }
+
+  function handleBodyDragLeave() {
+    setIsDragging(false);
+  }
+
+  function handleBodyDrop(event: DragEvent<HTMLTextAreaElement>) {
+    setIsDragging(false);
+    const images = pickImageFiles(event.dataTransfer?.files);
+
+    if (images.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    void (async () => {
+      for (const image of images) {
+        await uploadAssetFile(image);
+      }
+    })();
+  }
+
+  async function handleAssetDelete(fileName: string) {
+    const referenced = body.includes(`./${fileName}`);
+    const confirmed = window.confirm(
+      referenced
+        ? `正文中仍引用了 "${fileName}"，删除后图片会失效。确认删除吗？`
+        : `确认删除图片 "${fileName}" 吗？下次发布时生效。`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setErrorMessage("");
+    setStatusMessage("");
+
+    try {
+      const response = await fetch(`/api/posts/${post!.slug}/assets/${encodeURIComponent(fileName)}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "删除失败");
+      }
+
+      setAssets((current) => current.filter((asset) => asset !== fileName));
+      setStatusMessage(`已删除 ${fileName}`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "删除失败");
     }
   }
 
@@ -380,7 +562,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
 
           <div className="action-row">
             <button className="primary-button" disabled={isPending} onClick={handleSave} type="button">
-              {isPending ? "处理中..." : "保存草稿"}
+              {isPending ? "处理中..." : isDirty ? "保存草稿 *" : "保存草稿"}
             </button>
             <button className="secondary-button" disabled={isPending} onClick={handlePublish} type="button">
               发布到 GitHub
@@ -390,6 +572,7 @@ export function PostEditor({ mode, post }: PostEditorProps) {
                 删除文章
               </button>
             ) : null}
+            {isDirty ? <span className="status-text warning-text">有未保存的更改</span> : null}
           </div>
 
           <div className="meta-grid spacer-top">
@@ -449,7 +632,24 @@ export function PostEditor({ mode, post }: PostEditorProps) {
 
           <div className="field spacer-top">
             <label htmlFor="body">Markdown</label>
-            <textarea id="body" onChange={(event) => setBody(event.target.value)} value={body} />
+            <textarea
+              className={isDragging ? "is-dragging" : undefined}
+              id="body"
+              onChange={(event) => setBody(event.target.value)}
+              onDragLeave={handleBodyDragLeave}
+              onDragOver={handleBodyDragOver}
+              onDrop={handleBodyDrop}
+              onPaste={handleBodyPaste}
+              ref={bodyRef}
+              value={body}
+            />
+            <p className="helper-text">
+              {mode === "create"
+                ? "保存草稿后即可粘贴或拖拽图片上传。"
+                : isUploading
+                  ? "正在上传图片…"
+                  : "支持 Ctrl/Cmd+S 保存，可直接粘贴或拖拽图片到此处上传。"}
+            </p>
           </div>
 
           <div className="spacer-top">
@@ -464,20 +664,30 @@ export function PostEditor({ mode, post }: PostEditorProps) {
         <div className="asset-panel">
           <h2>图片资源</h2>
           <p className="muted-text">图片会写入文章 bundle 目录，并自动插入相对路径。</p>
-          <input accept="image/*" disabled={mode === "create"} onChange={handleAssetUpload} type="file" />
+          <input
+            accept="image/*"
+            disabled={mode === "create" || isUploading}
+            onChange={handleAssetUpload}
+            type="file"
+          />
 
           <div className="asset-list">
             {assets.length > 0 ? (
               assets.map((asset) => (
                 <div className="asset-item" key={asset}>
                   <span className="mono">{asset}</span>
-                  <button
-                    className="ghost-button"
-                    onClick={() => setBody((current) => `${current.trimEnd()}\n\n![](.\/${asset})\n`)}
-                    type="button"
-                  >
-                    插入
-                  </button>
+                  <div className="asset-item-actions">
+                    <button
+                      className="ghost-button"
+                      onClick={() => insertIntoBody(`![](./${asset})`)}
+                      type="button"
+                    >
+                      插入
+                    </button>
+                    <button className="danger-button" onClick={() => handleAssetDelete(asset)} type="button">
+                      删除
+                    </button>
+                  </div>
                 </div>
               ))
             ) : (

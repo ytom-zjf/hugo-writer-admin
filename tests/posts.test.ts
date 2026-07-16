@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ConflictError, NotFoundError, ValidationError } from "../lib/errors";
-import { getPost, listPosts, savePostAsset, updatePost } from "../lib/posts";
+import { deletePostAsset, getPost, listPosts, savePostAsset, updatePost } from "../lib/posts";
 
 async function writeTestConfig(tempDir: string) {
   await fs.writeFile(
@@ -117,6 +117,33 @@ test("savePostAsset rejects uploads to a missing post", async () => {
       () => savePostAsset("missing-post", new File([new Uint8Array([1])], "pic.png", { type: "image/png" })),
       NotFoundError,
     );
+  } finally {
+    process.chdir(previousCwd);
+    await fs.rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("deletePostAsset removes assets but protects the post file", async () => {
+  const previousCwd = process.cwd();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "writer-admin-posts-"));
+
+  try {
+    process.chdir(tempDir);
+    await writeTestConfig(tempDir);
+    await fs.mkdir(path.join(tempDir, "data", "repo", ".git"), { recursive: true });
+    await writePost(tempDir, "first-post", "First Post", "Body");
+
+    const postDir = path.join(tempDir, "data", "repo", "content", "posts", "first-post");
+    await fs.writeFile(path.join(postDir, "cover.png"), Buffer.from([1, 2, 3]));
+
+    await assert.rejects(() => deletePostAsset("first-post", "index.md"), ValidationError);
+    await assert.rejects(() => deletePostAsset("first-post", "missing.png"), NotFoundError);
+
+    const result = await deletePostAsset("first-post", "cover.png");
+    assert.equal(result.fileName, "cover.png");
+
+    await assert.rejects(() => fs.access(path.join(postDir, "cover.png")));
+    await fs.access(path.join(postDir, "index.md"));
   } finally {
     process.chdir(previousCwd);
     await fs.rm(tempDir, { force: true, recursive: true });
